@@ -58,8 +58,8 @@ public final class BeanMapper<P> extends PartialChain<P, P> {
    * 需要别的状态码时不要用本断言：那说明不是"无改动"场景，应改用链上的 {@code anyProvided()} 自行判定。
    */
   public BeanMapper<P> requireAnyProvided() {
-    // 304 NOT_MODIFIED：语义固定为"没有改动"，消息取状态短语，与框架无数据响应同形
-    state.requireAnyProvided(304, "Not Modified");
+    // AbortCode.NO_CHANGE：语义固定为"没有改动"，消息取状态短语，与框架无数据响应同形
+    state.requireAnyProvided();
     return this;
   }
 
@@ -79,8 +79,23 @@ public final class BeanMapper<P> extends PartialChain<P, P> {
   }
 
   /**
+   * 指定本次写入的中断处理扩展点（链首声明，作用于本次映射的全部中断点）。
+   *
+   * <p>
+   * 默认抛出 {@link BeanMapAbortException}。实现方返回自定义异常，由库在中断点抛出；
+   * 返回值为空时回退到默认异常。
+   *
+   * @param abortHandler
+   *          中断处理扩展点，不能为空
+   */
+  public BeanMapper<P> withAbortHandler(AbortHandler abortHandler) {
+    state.abortHandler(abortHandler);
+    return this;
+  }
+
+  /**
    * 按声明顺序执行全部字段，返回本次写入的结果（{@link BeanMapResource}）； 客户端的值不满足 {@code required} / {@code
-   * notClearable} 时抛 {@code BeanMapAbortException}（4xx）
+   * notClearable} 时默认抛 {@code BeanMapAbortException}（4xx），中断异常可由 {@link AbortHandler} 按入口替换
    */
   public BeanMapResource<P> apply() {
     return state.apply();

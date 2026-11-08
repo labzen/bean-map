@@ -328,8 +328,9 @@ public final class BeanField<P, R, T> extends PartialChain<P, R> {
    * "可选、但不可清空"（<b>缺省仍按契约跳过</b>，只有客户端<b>显式</b>写了 {@code null} 才拒绝）。
    *
    * <p>
-   * "拒绝"以抛 {@code BeanMapAbortException}（4xx）表达，与 {@code required} 同一套机制 —— 项目里 4xx 的
-   * 统一表达就是该异常（框架的异常过滤器会把它渲染成标准响应信封），业务域无需再手写 {@code if + return}。
+   * "拒绝"默认以抛 {@code BeanMapAbortException}（4xx）表达，与 {@code required} 同一套机制 —— 项目里 4xx 的
+   * 统一表达就是该异常（框架的异常过滤器会把它渲染成标准响应信封），业务域无需再手写 {@code if + return}；
+   * 中断异常可由 {@link AbortHandler} 按入口替换。
    *
    * <p>
    * 与 {@code withDefault} 互斥（一个把显式 null 换成默认值，一个拒绝显式 null）。
@@ -511,7 +512,7 @@ public final class BeanField<P, R, T> extends PartialChain<P, R> {
       return;
     }
     if (notClearable && provided && raw == null) {
-      throw requestError(notClearableMessage == null ? "不允许清空" : notClearableMessage);
+      throw requestError(AbortCode.NOT_CLEARABLE, notClearableMessage == null ? "不允许清空" : notClearableMessage);
     }
 
     Object value = raw;
@@ -524,10 +525,10 @@ public final class BeanField<P, R, T> extends PartialChain<P, R> {
 
     Object converted = value == null ? null : convert(value);
     if (required && !satisfied(converted)) {
-      throw requestError(requiredMessage == null ? "必须有值" : requiredMessage);
+      throw requestError(AbortCode.REQUIRED, requiredMessage == null ? "必须有值" : requiredMessage);
     }
     if (converted == null && targetType != null && targetType.isPrimitive()) {
-      throw requestError("不接受 null（该字段为基本类型）");
+      throw requestError(AbortCode.TYPE_MISMATCH, "不接受 null（该字段为基本类型）");
     }
 
     // 原值在写入之前读：读不到（domain 上无同名属性，如计算型 setter）按"已改变"保守处理
@@ -541,7 +542,7 @@ public final class BeanField<P, R, T> extends PartialChain<P, R> {
     try {
       writer.write(domain, converted);
     } catch (NullPointerException e) {
-      throw requestError("不接受 null（该字段为基本类型）");
+      throw requestError(AbortCode.TYPE_MISMATCH, "不接受 null（该字段为基本类型）");
     }
     written = true;
     writtenValue = converted;
@@ -586,11 +587,11 @@ public final class BeanField<P, R, T> extends PartialChain<P, R> {
     if (conversion.canConvert(value.getClass(), target)) {
       return conversion.convert(value, target);
     }
-    throw requestError("值类型无法写入该字段：" + value.getClass().getSimpleName());
+    throw requestError(AbortCode.TYPE_MISMATCH, "值类型无法写入该字段：" + value.getClass().getSimpleName());
   }
 
-  private BeanMapAbortException requestError(String detail) {
-    return new BeanMapAbortException(400, "字段 " + path + "：" + detail);
+  private RuntimeException requestError(AbortCode code, String detail) {
+    return state.abort(code, "字段 " + path + "：" + detail);
   }
 
   /**

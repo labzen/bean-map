@@ -105,6 +105,8 @@ UserDto dto = BeanReader.read(user, new UserDto())
 | `DtoReflection`、`LambdaNames` | 属性路径反射读取、方法引用解析属性名 |
 | `BeanMapCoverage` | 覆盖度断言（由测试调用） |
 | `BeanMapException` / `BeanMapAbortException` | 声明期错误 / 策略中断 |
+| `AbortCode` | 策略中断语义码，携带等价整型状态码与默认提示 |
+| `AbortHandler` | 中断处理扩展点，决定一次中断要抛出的异常 |
 | `BeanMapProcessor` | APT 处理器，生成 `*BeanMapImpl` |
 
 ## 字段声明与修饰符
@@ -123,6 +125,7 @@ UserDto dto = BeanReader.read(user, new UserDto())
 | `anyProvided()` | 本链声明的字段里是否有任一在负载中出现 |
 | `requireAnyProvided()` | 写入级断言，无任何输入时以 `304` 中断 |
 | `withConversionService(cs)` | 链首声明，指定本次写入使用的 `ConversionService`；默认 Spring 共享实例 |
+| `withAbortHandler(handler)` | 链首声明，指定本次写入的中断处理扩展点；默认抛 `BeanMapAbortException` |
 | `apply()` | 按声明顺序执行，返回 `BeanMapResource<R>` |
 
 字段修饰符：
@@ -211,14 +214,36 @@ public interface UserBeanMap {
 
 该断言属于代码问题而非运行期问题，由域的**测试**显式调用，运行期不做此项校验。
 
-## 异常
+## 异常与策略中断
 
 | 异常 | 场景 |
 |---|---|
 | `BeanMapException` | 声明期校验失败、反射读写失败、结果查询非法；支持 `{}` 占位符格式化 |
-| `BeanMapAbortException` | 策略中断（`requireAnyProvided`、`required`、`notClearable` 等），`getCode()` 提供整型语义码（`304` / `400`） |
+| `BeanMapAbortException` | 策略中断（`requireAnyProvided`、`required`、`notClearable`、类型转换失败等） |
 
-库本身不依赖任何 Web 框架，语义码由上层（如 `cn.labzen:web`）映射为 HTTP 状态。
+`AbortCode` 枚举给出中断语义码及等价的整型状态码：
+
+| 语义码 | 整型码 | 场景 |
+|---|---|---|
+| `NO_CHANGE` | 304 | 声明的字段一个都没在负载里出现 |
+| `REQUIRED` | 400 | 必填字段没有可用值 |
+| `NOT_CLEARABLE` | 400 | 不可清空字段被显式传 null |
+| `TYPE_MISMATCH` | 400 | 值无法转换或写入目标类型 |
+| `FIELD_CONFLICT` | 409 | 多源合并时同一字段出现冲突 |
+
+`BeanMapAbortException#getAbortCode()` 返回语义码，`getCode()` 返回等价整型码。库本身不依赖任何 Web 框架，整型码由上层（如 `cn.labzen:web`）映射为 HTTP 状态。
+
+中断行为由链首注入的 `AbortHandler` 决定：
+
+```java
+BeanMapper.of(user, source)
+        .withAbortHandler((code, message) -> new MyBusinessException(code, message))
+        .requireAnyProvided()
+        .mapAll()
+        .apply();
+```
+
+`AbortHandler` 返回本次中断要抛出的异常，由库在中断点执行 `throw`；默认实现为 `AbortHandler.THROWING`，返回 `BeanMapAbortException`，返回空时回退到默认异常。作用域为单次写入，与 `withConversionService(...)` 一致。
 
 ## 边界与约束
 
@@ -226,9 +251,9 @@ public interface UserBeanMap {
 - `sub` 不做环检测，自引用嵌套会栈溢出。
 - 子对象块的源值必须实现 `SourceAccessor`，否则声明期抛 `BeanMapException`。
 - 读方向 `mapAll()` 会跳过两侧类型不一致的属性，这类字段需显式 `map(...)`。
-- record / Map 源、集合元素级映射、多源合并、SPI 扩展点、`labzen.yml` 配置均不在 1.0.0 能力范围内。
+- record / Map 源、集合元素级映射、多源合并、`ServiceLoader` 式自动加载、`labzen.yml` 配置均不在当前能力范围内。
 - 1.0.0 未附带测试用例，使用方需自行编写覆盖度断言测试。
 
 ## 版本与发布
 
-`cn.labzen:bean-map:1.0.0` 已发布至 Maven Central；本仓库当前源码另包含链级类型转换器注入点，发布前需提升版本号。parent 为 `cn.labzen:parent:21.3`（统一 import `labzen-bom:2.3`），JDK 21，Apache License 2.0。源码仓库：`git@github.com:labzen/bean-map.git`。
+`cn.labzen:bean-map:1.0.0` 已发布至 Maven Central；本仓库当前源码另包含链级类型转换器注入点、中断语义码与中断处理扩展点，发布前需提升版本号。parent 为 `cn.labzen:parent:21.3`（统一 import `labzen-bom:2.3`），JDK 21，Apache License 2.0。源码仓库：`git@github.com:labzen/bean-map.git`。

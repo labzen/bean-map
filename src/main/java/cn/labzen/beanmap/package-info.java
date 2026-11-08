@@ -43,8 +43,8 @@
  * <p>
  * <b>入口级策略</b>用链首的 {@link BeanMapper#excludes(BeanGetter[])} 声明："本入口不管这些字段"（恒不写入、不计入 "有没有输入"、{@code
  * mapAll()} 会跳过它），且同一入口若再声明它们 ⇒ 声明期报错。它与覆盖度断言配套： DTO 每个字段的归宿 = 某个入口链上声明（可写）／{@code @BeanUnmapped}（永不写入）／某入口
- * {@code excludes} （本入口不管），三者都不是即构建期断言失败（写在域的测试里）—— <b>不需要任何手抄清单</b>。 "拒绝"一律以抛 {@code BeanMapAbortException}（4xx）表达，与项目的 4xx
- * 表达一致（框架的异常过滤器渲染成标准响应信封）。
+ * {@code excludes} （本入口不管），三者都不是即构建期断言失败（写在域的测试里）—— <b>不需要任何手抄清单</b>。 "拒绝"默认以抛 {@code BeanMapAbortException}（4xx）表达，与项目的 4xx
+ * 表达一致（框架的异常过滤器渲染成标准响应信封）；中断异常可由 {@link AbortHandler} 按入口替换。
  *
  * <h3>怎么用</h3>
  *

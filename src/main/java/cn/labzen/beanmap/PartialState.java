@@ -9,7 +9,7 @@ import org.springframework.core.convert.support.DefaultConversionService;
 import java.util.*;
 
 /**
- * 一次写入的作用域：参与写入的全部字段声明 + 写入级断言 + 类型转换器 + 写入结果
+ * 一次写入的作用域：参与写入的全部字段声明 + 写入级断言 + 类型转换器 + 中断处理扩展点 + 写入结果
  */
 final class PartialState {
 
@@ -20,9 +20,8 @@ final class PartialState {
   private Object rootDomain;
   private SourceAccessor rootDto;
   private ConversionService conversionService = DefaultConversionService.getSharedInstance();
+  private AbortHandler abortHandler = AbortHandler.THROWING;
   private boolean requireAnyProvided;
-  private int requireAnyProvidedCode;
-  private String requireAnyProvidedMessage;
 
   void declare(BeanField<?, ?, ?> field) {
     fields.add(field);
@@ -107,12 +106,32 @@ final class PartialState {
   }
 
   /**
-   * 声明写入级断言：声明的字段里至少有一个在负载里出现过，否则以给定状态码中断业务处理
+   * 指定本次写入的中断处理扩展点
    */
-  void requireAnyProvided(int code, String message) {
+  void abortHandler(AbortHandler abortHandler) {
+    this.abortHandler = Objects.requireNonNull(abortHandler, "中断处理扩展点不能为空");
+  }
+
+  /**
+   * 本次写入的中断处理扩展点（默认抛 {@link BeanMapAbortException}）
+   */
+  AbortHandler abortHandler() {
+    return abortHandler;
+  }
+
+  /**
+   * 构造本次中断要抛出的异常；扩展点返回空时回退到默认异常
+   */
+  RuntimeException abort(AbortCode code, String message) {
+    RuntimeException error = abortHandler.onAbort(code, message);
+    return error == null ? new BeanMapAbortException(code, message) : error;
+  }
+
+  /**
+   * 声明写入级断言：声明的字段里至少有一个在负载里出现过，否则以 {@link AbortCode#NO_CHANGE} 中断业务处理
+   */
+  void requireAnyProvided() {
     this.requireAnyProvided = true;
-    this.requireAnyProvidedCode = code;
-    this.requireAnyProvidedMessage = message;
   }
 
   /**
@@ -154,7 +173,7 @@ final class PartialState {
   @SuppressWarnings("unchecked")
   <R> BeanMapResource<R> apply() {
     if (requireAnyProvided && !anyProvided()) {
-      throw new BeanMapAbortException(requireAnyProvidedCode, requireAnyProvidedMessage);
+      throw abort(AbortCode.NO_CHANGE, AbortCode.NO_CHANGE.defaultMessage());
     }
     for (BeanField<?, ?, ?> field : effectiveFields()) {
       field.write();

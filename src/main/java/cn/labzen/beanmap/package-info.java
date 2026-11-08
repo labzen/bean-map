@@ -69,6 +69,7 @@
  * <li>{@link cn.labzen.beanmap.BeanGetter} — 已绑定取值引用（{@code resource::getEmail}），用于解析属性名；
  * <li>{@link cn.labzen.beanmap.BeanSetter} — 未绑定设值引用（{@code User::setEmail}），写入时作用于当前链节点的 domain；
  * <li>{@link cn.labzen.beanmap.BeanMapCoverage} — 覆盖度断言（构建期：由域的测试调用，运行期不做声明校验）；
+ * <li>{@link cn.labzen.beanmap.BeanOp} / {@link cn.labzen.beanmap.MappingType} — 映射接口方法的显式形态声明；
  * <li>相关的源对象载体见 {@code SourceAccessor#isProvided}，标注见 {@code @BeanUnmapped} / {@code @BeanClearable} /
  * {@code @BeanUnmappedBlank}，异常见 {@code BeanMapException}。
  * </ul>

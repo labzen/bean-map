@@ -268,7 +268,8 @@ JavaBean / POJO 源按两态处理（字段视为全部出现）；`MapAccessor`
 | `@BeanClearable` | DTO 类 / 字段 | 允许被显式 `null` 清空，即 `nullable()` 的默认规则；`value = false` 可从类级默认中豁免 |
 | `@BeanUnmappedBlank` | DTO 类 / 字段 | String 字段空白串视为没传，即 `ignoreBlank()` 的默认规则 |
 | `@BeanMap` | 接口 | 标记映射接口，由 APT 生成实现 |
-| `@BeanTarget` | 方法参数 | 在 `updateDomain` 中标出被写入的领域对象参数 |
+| `@BeanOp` | 方法 | 显式声明映射形态（`MappingType`），优先于方法名分派 |
+| `@BeanTarget` | 方法参数 | 在编辑形态中标出被写入的领域对象参数 |
 | `@BeanMapField` / `@BeanMapFields` | 方法 | 读方向单字段映射：`source` / `target` / `ignore` / `converter` |
 
 ## APT 生成
@@ -276,23 +277,42 @@ JavaBean / POJO 源按两态处理（字段视为全部出现）；`MapAccessor`
 ```java
 @BeanMap
 public interface UserBeanMap {
-  User toDomain(UserDto dto);
-  void updateDomain(UserDto dto, @BeanTarget User domain);
-  void copyDto(UserDto source, UserDto target);
+  @BeanOp(MappingType.TO_DOMAIN)
+  User create(UserDto dto);
+
+  @BeanOp(MappingType.UPDATE_DOMAIN)
+  void update(UserDto dto, @BeanTarget User domain);
+
+  @BeanOp(MappingType.COPY_DTO)
+  void copy(UserDto source, UserDto target);
+
+  @BeanOp(MappingType.TO_DTO)
   UserDto toDto(User domain);
 }
 ```
 
-编译期在同包生成 `UserBeanMapImpl`（默认 `spring` 模式带 `@Component`），方法体委托给编程式 API：
+编译期在同包生成 `UserBeanMapImpl`（默认 `spring` 模式带 `@Component`），方法体委托给编程式 API。方法上的 `@BeanOp` 优先决定生成骨架，方法名不参与分派：
 
-| 方法形态 | 识别方式 | 生成逻辑 |
+| `MappingType` | 签名要求 | 生成逻辑 |
 |---|---|---|
-| `toDomain(Dto)` | `toDomain` 前缀 + 单参 + 有返回值 | `new` 出 domain 后 `BeanMapper.of(...).mapAll().apply()` |
-| `updateDomain(..., @BeanTarget Domain)` | 双参、返回 `void`、其中一个参数带 `@BeanTarget` | 对传入 domain 就地 `mapAll()`；参数顺序按接口声明保持 |
-| `copyDto(Src, Tgt)` | 方法名 `copyDto` + 双参 + `void` | `BeanReader.read(src, tgt).mapAll().apply()`，第二参数类型按接口声明 |
-| 读方向（单参 + 有返回值） | 兜底分支：不匹配 `toDomain` 的单参有返回值方法，不区分 `toDto` / `toChain` | `BeanReader.read(...)`，按 `@BeanMapField` 声明显式映射后 `mapAll()` |
+| `TO_DOMAIN` | 单参、有返回值 | `new` 出返回类型后 `BeanMapper.of(...).mapAll().apply()` |
+| `UPDATE_DOMAIN` | 双参、`void` | 对目标参数就地 `mapAll()`；目标取带 `@BeanTarget` 的参数，缺省取第二参数 |
+| `COPY_DTO` | 双参、`void` | `BeanReader.read(第一参数, 第二参数).mapAll().apply()` |
+| `TO_DTO` / `TO_CHAIN` | 单参、有返回值 | `BeanReader.read(...)`，按 `@BeanMapField` 声明显式映射后 `mapAll()` |
 
-`static` / `default` 方法不参与生成。处理器不读取 domain / DTO 的字段，只解析映射接口的方法签名，因此不依赖 Lombok 的字段生成顺序。未识别的方法形态生成抛 `UnsupportedOperationException` 的方法体；处理器内部生成失败以编译期 `ERROR` 诊断报告。
+形态与签名不匹配时，处理器以编译期 `ERROR` 报告；源与目标类型均由方法签名推断，注解不重复声明类型。
+
+未标注 `@BeanOp` 的方法按以下判据回退分派，并产生编译告警：
+
+| 回退判据 | 生成逻辑 |
+|---|---|
+| 双参、返回 `void`、其中一个参数带 `@BeanTarget` | 编辑映射，对传入 domain 就地 `mapAll()` |
+| `toDomain` 前缀 + 单参 + 有返回值 | 新建 domain 后同名直写 |
+| 方法名 `copyDto` + 双参 + `void` | `BeanReader.read(...).mapAll().apply()` |
+| 其余单参 + 有返回值 | 读方向装配（不区分 `toDto` / `toChain`） |
+| 其它 | 生成抛 `UnsupportedOperationException` 的方法体 |
+
+`static` / `default` 方法不参与生成。处理器不读取 domain / DTO 的字段，只解析映射接口的方法签名，因此不依赖 Lombok 的字段生成顺序；处理器内部生成失败以编译期 `ERROR` 诊断报告。
 
 处理器经 `META-INF/services/javax.annotation.processing.Processor` 注册。本库构建时通过 `<proc>none</proc>` 关闭注解处理（处理器类自身尚未生成），下游以 jar 依赖本库时正常触发代码生成。
 
@@ -386,13 +406,26 @@ BeanComposer.compose(view)
 
 ## 边界与约束
 
-- 字段取值与写入走反射，转换走链上的 `ConversionService`（默认 Spring 共享实例，可按入口替换），运行时慢于生成代码；高吞吐批量映射需评估。
+以下为已确认的设计边界，不是待办项；能力现状以本节为准。
+
+**设计取舍（不计划支持）**
+
 - `sub` 不做环检测，自引用嵌套会栈溢出。
+- 扁平化 / 继承映射需显式 `sub`，库不做自动展开。
+- 纯内存对象对对象，流式 / 大数据场景不适用。
+- 配置文件驱动（如 `labzen.yml`）、运行时规则 DSL、`ServiceLoader` 式自动加载与全局映射器注册表均不提供；默认策略由 `BeanMapConfiguration` 按入口显式传入。
+- `BeanComposer` 只裁决字段整体值，不做子字段级跨源合并与聚合覆盖度断言。
 - 子对象块的源值必须实现 `SourceAccessor`，否则声明期抛 `BeanMapException`。
+
+**当前实现限制**
+
+- 字段取值与写入走反射，转换走链上的 `ConversionService`（默认 Spring 共享实例，可按入口替换），运行时慢于生成代码；高吞吐批量映射需评估。
 - 读方向 `mapAll()` 会跳过两侧类型不一致、源对象没有 public `getXxx` / `isXxx` 的属性（含 record 裸 accessor）、以及目标字段上的 `@BeanUnmapped`；被跳过的字段需显式 `map(...)` 或保持不写。
-- 配置文件驱动（如 `labzen.yml`）与 `ServiceLoader` 式自动加载不在当前能力范围内；默认策略由 `BeanMapConfiguration` 按入口显式传入。
-- 库内自带 JUnit 5 测试套件，`mvn test` 执行且测试失败即中止构建；覆盖度断言 `BeanMapCoverage.verify(...)` 由使用方的测试显式调用。
+- record / 无 setter 的不可变对象不能作为写方向目标；元素级映射由 `InstantiationStrategy` 提供实例。
+- `JavaBeanAccessor` 构造期拒绝 Map、数组、primitive、枚举与常见标量；普通 `List` 等容器不在拒绝范围内，其它源形态由调用方实现 `SourceAccessor`。
+
+库内自带 JUnit 5 测试套件，`mvn test` 执行且测试失败即中止构建；覆盖度断言 `BeanMapCoverage.verify(...)` 由使用方的测试显式调用。
 
 ## 版本与发布
 
-`cn.labzen:bean-map:1.1.1` 已发布至 Maven Central，对应本仓库当前源码能力；`1.0.0` 为首个发布版本。Central 版本不可覆盖，后续发布需提升版本号。parent 为 `cn.labzen:parent:21.3`（统一 import `labzen-bom:2.3`），JDK 21，Apache License 2.0。源码仓库：`git@github.com:labzen/bean-map.git`。版本记录与各版本升级注意事项见 `CHANGELOG.md`。
+`cn.labzen:bean-map:1.1.1` 为当前已发布版本；`1.0.0` 为首个发布版本。仓库 `main` 另含尚未发布的 `@BeanOp` / `MappingType` 显式形态分派，随 `1.2.0` 发布。Central 版本不可覆盖，后续发布需提升版本号。parent 为 `cn.labzen:parent:21.3`（统一 import `labzen-bom:2.3`），JDK 21，Apache License 2.0。源码仓库：`git@github.com:labzen/bean-map.git`。版本记录、版本策略与各版本升级注意事项见 `CHANGELOG.md`。

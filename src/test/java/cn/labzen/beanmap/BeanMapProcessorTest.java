@@ -153,4 +153,88 @@ class BeanMapProcessorTest {
     assertFalse(result.generated().contains("helper"), result.generated());
     assertFalse(result.generated().contains("rank"), result.generated());
   }
+
+  @Test
+  void explicitBeanOpGeneratesAllFiveForms() throws Exception {
+    Compilation result = compile(fixture("""
+              @BeanOp(MappingType.TO_DOMAIN)
+              Domain create(Dto dto);
+              @BeanOp(MappingType.UPDATE_DOMAIN)
+              void patch(Dto dto, @BeanTarget Domain domain);
+              @BeanOp(MappingType.COPY_DTO)
+              void duplicate(Src src, Tgt tgt);
+              @BeanOp(MappingType.TO_DTO)
+              Dto view(Domain domain);
+              @BeanOp(MappingType.TO_CHAIN)
+              Dto chain(Domain domain);
+            """));
+
+    assertTrue(result.ok(), result.diagnostics());
+    assertTrue(result.generated().contains("public t.Domain create(t.Dto dto)"), result.generated());
+    assertTrue(result.generated().contains("t.Domain beanMapTarget = new t.Domain()"), result.generated());
+    assertTrue(result.generated().contains("public void patch(t.Dto dto, t.Domain domain)"), result.generated());
+    assertTrue(result.generated().contains("BeanMapper.of(domain, new JavaBeanAccessor(dto))"), result.generated());
+    assertTrue(result.generated().contains("public void duplicate(t.Src src, t.Tgt tgt)"), result.generated());
+    assertTrue(result.generated().contains("BeanReader.read(src, tgt).mapAll().apply()"), result.generated());
+    assertTrue(result.generated().contains("public t.Dto view(t.Domain domain)"), result.generated());
+    assertTrue(result.generated().contains("public t.Dto chain(t.Domain domain)"), result.generated());
+    assertFalse(result.diagnostics().contains("未标注 @BeanOp"), result.diagnostics());
+  }
+
+  @Test
+  void beanOpTakesPrecedenceOverMethodName() throws Exception {
+    Compilation result = compile(fixture("""
+              @BeanOp(MappingType.COPY_DTO)
+              void toDto(Domain domain, Dto dto);
+            """));
+
+    assertTrue(result.ok(), result.diagnostics());
+    assertTrue(result.generated().contains("BeanReader.read(domain, dto).mapAll().apply()"), result.generated());
+    assertFalse(result.generated().contains("UnsupportedOperationException"), result.generated());
+  }
+
+  @Test
+  void unannotatedMethodFallsBackWithWarning() throws Exception {
+    Compilation result = compile(fixture("  void copyDto(Src src, Tgt tgt);"));
+
+    assertTrue(result.ok(), result.diagnostics());
+    assertTrue(result.generated().contains("BeanReader.read(src, tgt).mapAll().apply()"), result.generated());
+    assertTrue(result.diagnostics().contains("WARNING"), result.diagnostics());
+    assertTrue(result.diagnostics().contains("未标注 @BeanOp"), result.diagnostics());
+  }
+
+  @Test
+  void invalidBeanOpShapeReportsCompileError() throws Exception {
+    Compilation result = compile(fixture("""
+              @BeanOp(MappingType.COPY_DTO)
+              Dto toDto(Domain domain);
+            """));
+
+    assertFalse(result.ok(), result.diagnostics());
+    assertTrue(result.diagnostics().contains("ERROR"), result.diagnostics());
+    assertTrue(result.diagnostics().contains("@BeanOp(COPY_DTO) 要求方法签名为"), result.diagnostics());
+  }
+
+  @Test
+  void beanOpWorksWithSpiRegistry() throws Exception {
+    Compilation result = compile(fixture("""
+              @BeanOp(MappingType.TO_DTO)
+              Dto view(Domain domain);
+            """), "-Abeanmap.registry=spi");
+
+    assertTrue(result.ok(), result.diagnostics());
+    assertFalse(result.generated().contains("@Component"), result.generated());
+    assertTrue(result.generated().contains("public t.Dto view(t.Domain domain)"), result.generated());
+  }
+
+  @Test
+  void updateDomainWithoutBeanTargetUsesSecondParameter() throws Exception {
+    Compilation result = compile(fixture("""
+              @BeanOp(MappingType.UPDATE_DOMAIN)
+              void patch(Dto dto, Domain domain);
+            """));
+
+    assertTrue(result.ok(), result.diagnostics());
+    assertTrue(result.generated().contains("BeanMapper.of(domain, new JavaBeanAccessor(dto))"), result.generated());
+  }
 }

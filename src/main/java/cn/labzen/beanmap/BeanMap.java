@@ -13,15 +13,16 @@ import java.lang.annotation.Target;
  * 标注一个 bean-to-bean 映射接口，由 {@link BeanMapProcessor} 在编译期生成实现（{@code *BeanMapImpl}）。
  *
  * <p>
- * 方法形态由方法名前缀与 {@link BeanTarget} 识别：
+ * 方法形态优先由方法上的 {@link BeanOp} + {@link MappingType} 声明；未标注时按签名回退分派并产生编译告警：
  * <ul>
- * <li>{@code toDomain(Dto)} —— new 出 domain 后同名直写，返回 domain；</li>
- * <li>{@code updateDomain(Dto, @BeanTarget Domain)} —— 对传入 domain 就地同名直写；</li>
- * <li>{@code copyDto(Src, Tgt)} —— 同类型 DTO 拷贝，走 {@link BeanReader} 同名直读；</li>
- * <li>{@code toDto(Domain)} / {@code toChain(Domain)} —— 读方向装配，可用 {@link BeanMapField} 声明重命名 / 转换 / 忽略。</li>
+ * <li>双参 {@code void} 且其中一个参数带 {@link BeanTarget} —— 对传入 domain 就地同名直写；</li>
+ * <li>{@code toDomain} 前缀 + 单参 + 有返回值 —— new 出返回类型后同名直写；</li>
+ * <li>{@code copyDto} + 双参 + {@code void} —— 走 {@link BeanReader} 同名直读；</li>
+ * <li>其余单参有返回值的方法 —— 读方向装配，可用 {@link BeanMapField} 声明重命名 / 转换 / 忽略。</li>
  * </ul>
  *
- * 生成的实现带 {@code @Component}，字段映射委托给 {@link BeanMapper} / {@link BeanReader}；未识别的方法形态生成抛 {@link UnsupportedOperationException} 的方法体。
+ * 生成类的注册方式由 {@code -Abeanmap.registry} 决定（缺省 {@code spring} 带 {@code @Component}）；字段映射委托给
+ * {@link BeanMapper} / {@link BeanReader}；未识别的方法形态生成抛 {@link UnsupportedOperationException} 的方法体。
  *
  * @since 2026-11-07
  */

@@ -30,14 +30,10 @@ import javax.tools.JavaFileObject;
  * 处理 {@link BeanMap} 注解，为映射接口生成实现类（{@code *BeanMapImpl}）。
  *
  * <p>
- * 生成规则：
- * <ul>
- * <li>{@code toDomain(Dto)} —— 创建全量映射：new 出 domain 后同名直写（{@code BeanMapper#mapAll()}）；</li>
- * <li>{@code updateDomain(Dto, @BeanTarget Domain)} —— 编辑映射：对传入 domain 就地同名直写；</li>
- * <li>{@code copyDto(Dto, Dto)} —— DTO 同类型拷贝：{@link BeanReader#read(Object, Object)} 同名直读。</li>
- * <li>{@code toDto(Domain)} / {@code toChain(Domain)} —— 读方向装配：{@link BeanReader#read(Object, Object)}
- * 同名直读（{@code mapAll()}） + 方法上的 {@link BeanMapField} 显式映射（重命名 / 转换 / 忽略），二者并存。</li>
- * </ul>
+ * 映射形态优先由方法上的 {@link BeanOp} 显式声明；未标注的方法按签名回退分派并产生编译告警。五种形态见 {@link MappingType}，
+ * 生成代码均为委托给编程式 API 的骨架：{@code TO_DOMAIN} / {@code UPDATE_DOMAIN} 走 {@code mapAll()} 同名直写，
+ * {@code COPY_DTO} / {@code TO_DTO} / {@code TO_CHAIN} 走 {@link BeanReader#read(Object, Object)} 同名直读，
+ * 读方向可叠加 {@link BeanMapField} 显式映射（重命名 / 转换 / 忽略）。
  *
  * <p>
  * 生成代码统一委托给编程式 {@link BeanMapper} / {@link BeanReader}（字段管线、三态门控、 {@code @BeanUnmapped}/{@code @BeanClearable}
@@ -86,6 +82,10 @@ public class BeanMapProcessor extends AbstractProcessor {
       Set<Modifier> modifiers = method.getModifiers();
       if (modifiers.contains(Modifier.STATIC) || modifiers.contains(Modifier.DEFAULT)) {
         continue;
+      }
+      if (method.getAnnotation(BeanOp.class) == null) {
+        processingEnv.getMessager().printMessage(Diagnostic.Kind.WARNING,
+                "方法 " + method.getSimpleName() + " 未标注 @BeanOp，按方法签名回退生成", method);
       }
       try {
         body.append(generateMethod(method));
@@ -139,60 +139,109 @@ public class BeanMapProcessor extends AbstractProcessor {
   private String generateMethod(ExecutableElement method) {
     String name = method.getSimpleName().toString();
     List<? extends VariableElement> params = method.getParameters();
-    boolean returnsDomain = method.getReturnType().getKind() != TypeKind.VOID;
+    boolean returnsValue = method.getReturnType().getKind() != TypeKind.VOID;
     String paramList = params.stream()
             .map(p -> typeName(p.asType()) + " " + p.getSimpleName())
             .collect(Collectors.joining(", "));
-    String returnType = returnsDomain ? typeName(method.getReturnType()) : "void";
+    String returnType = returnsValue ? typeName(method.getReturnType()) : "void";
 
     VariableElement domainParam = params.stream()
             .filter(p -> p.getAnnotation(BeanTarget.class) != null)
             .findFirst().orElse(null);
 
-    if (domainParam != null && !returnsDomain && params.size() == 2) {
-      VariableElement dtoParam = params.stream().filter(p -> p != domainParam).findFirst().orElseThrow();
-      String domainName = domainParam.getSimpleName().toString();
-      String dtoName = dtoParam.getSimpleName().toString();
-      return """
-              @Override
-              public void %s(%s) {
-                BeanMapper.of(%s, new JavaBeanAccessor(%s)).mapAll().apply();
-              }
-
-              """.formatted(name, paramList, domainName, dtoName);
-    } else if (name.startsWith("toDomain") && params.size() == 1 && returnsDomain) {
-      String domainType = typeName(method.getReturnType());
-      String dtoName = params.get(0).getSimpleName().toString();
-      return """
-              @Override
-              public %s %s(%s) {
-                %s domain = new %s();
-                BeanMapper.of(domain, new JavaBeanAccessor(%s)).mapAll().apply();
-                return domain;
-              }
-
-              """.formatted(domainType, name, paramList, domainType, domainType, dtoName);
-    } else if (name.equals("copyDto") && params.size() == 2 && !returnsDomain) {
-      String srcName = params.get(0).getSimpleName().toString();
-      String tgtName = params.get(1).getSimpleName().toString();
-      return """
-              @Override
-              public void %s(%s) {
-                BeanReader.read(%s, %s).mapAll().apply();
-              }
-
-              """.formatted(name, paramList, srcName, tgtName);
-    } else if (params.size() == 1 && returnsDomain) {
-      return generateRead(method, paramList);
-    } else {
-      return """
-              @Override
-              public %s %s(%s) {
-                throw new UnsupportedOperationException("@BeanMap 暂不支持的方法形态：" + %s);
-              }
-
-              """.formatted(returnType, name, paramList, "\"" + name + "\"");
+    BeanOp op = method.getAnnotation(BeanOp.class);
+    if (op != null) {
+      return generateByOp(op.value(), method, name, paramList, returnsValue, params, domainParam);
     }
+
+    if (domainParam != null && !returnsValue && params.size() == 2) {
+      VariableElement dtoParam = params.stream().filter(p -> p != domainParam).findFirst().orElseThrow();
+      return generateUpdate(name, paramList, domainParam.getSimpleName().toString(), dtoParam.getSimpleName().toString());
+    } else if (name.startsWith("toDomain") && params.size() == 1 && returnsValue) {
+      return generateToDomain(typeName(method.getReturnType()), name, paramList,
+              params.get(0).getSimpleName().toString());
+    } else if (name.equals("copyDto") && params.size() == 2 && !returnsValue) {
+      return generateCopy(name, paramList, params.get(0).getSimpleName().toString(),
+              params.get(1).getSimpleName().toString());
+    } else if (params.size() == 1 && returnsValue) {
+      return generateRead(method, paramList);
+    }
+    return generateUnsupported(returnType, name, paramList);
+  }
+
+  private String generateByOp(MappingType type, ExecutableElement method, String name, String paramList,
+                              boolean returnsValue, List<? extends VariableElement> params,
+                              VariableElement domainParam) {
+    return switch (type) {
+      case TO_DOMAIN -> {
+        requireShape(returnsValue && params.size() == 1, type, "单参且有返回值");
+        yield generateToDomain(typeName(method.getReturnType()), name, paramList,
+                params.get(0).getSimpleName().toString());
+      }
+      case UPDATE_DOMAIN -> {
+        requireShape(!returnsValue && params.size() == 2, type, "双参且返回 void");
+        VariableElement target = domainParam != null ? domainParam : params.get(1);
+        VariableElement source = params.stream().filter(p -> p != target).findFirst().orElseThrow();
+        yield generateUpdate(name, paramList, target.getSimpleName().toString(), source.getSimpleName().toString());
+      }
+      case COPY_DTO -> {
+        requireShape(!returnsValue && params.size() == 2, type, "双参且返回 void");
+        yield generateCopy(name, paramList, params.get(0).getSimpleName().toString(),
+                params.get(1).getSimpleName().toString());
+      }
+      case TO_DTO, TO_CHAIN -> {
+        requireShape(returnsValue && params.size() == 1, type, "单参且有返回值");
+        yield generateRead(method, paramList);
+      }
+    };
+  }
+
+  private void requireShape(boolean valid, MappingType type, String expected) {
+    if (!valid) {
+      throw new IllegalArgumentException("@BeanOp(" + type + ") 要求方法签名为" + expected);
+    }
+  }
+
+  private String generateUpdate(String name, String paramList, String domainName, String dtoName) {
+    return """
+            @Override
+            public void %s(%s) {
+              BeanMapper.of(%s, new JavaBeanAccessor(%s)).mapAll().apply();
+            }
+
+            """.formatted(name, paramList, domainName, dtoName);
+  }
+
+  private String generateToDomain(String domainType, String name, String paramList, String dtoName) {
+    return """
+            @Override
+            public %s %s(%s) {
+              %s beanMapTarget = new %s();
+              BeanMapper.of(beanMapTarget, new JavaBeanAccessor(%s)).mapAll().apply();
+              return beanMapTarget;
+            }
+
+            """.formatted(domainType, name, paramList, domainType, domainType, dtoName);
+  }
+
+  private String generateCopy(String name, String paramList, String srcName, String tgtName) {
+    return """
+            @Override
+            public void %s(%s) {
+              BeanReader.read(%s, %s).mapAll().apply();
+            }
+
+            """.formatted(name, paramList, srcName, tgtName);
+  }
+
+  private String generateUnsupported(String returnType, String name, String paramList) {
+    return """
+            @Override
+            public %s %s(%s) {
+              throw new UnsupportedOperationException("@BeanMap 暂不支持的方法形态：" + %s);
+            }
+
+            """.formatted(returnType, name, paramList, "\"" + name + "\"");
   }
 
   private String generateRead(ExecutableElement method, String paramList) {

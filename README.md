@@ -45,7 +45,28 @@ public interface SourceAccessor {
 }
 ```
 
-内置实现 `JavaBeanAccessor` 对任意 JavaBean / POJO 反射读值，是**两态实现**（`isProvided` 恒返回 `true`），即所有字段都视为「出现」。需要区分「没传」与「传了 null」时，由调用方实现 `SourceAccessor`（例如基于 JSON 节点或请求负载的 key 集合）。
+内置实现：
+
+| 访问器 | 源 | presence 判定 |
+|---|---|---|
+| `JavaBeanAccessor` | JavaBean / POJO / record | 两态，`isProvided` 恒返回 `true` |
+| `MapAccessor` | `Map<String, Object>` 负载 | 三态，按 key 是否存在判定 |
+
+`JavaBeanAccessor` 对普通对象走字段反射、对 record 走组件 accessor；构造时校验源形状，Map、数组、标量等不具备可解析形状的对象在声明期即抛 `BeanMapException` 并给出可读提示，不静默退化。
+
+`MapAccessor` 的第一个参数是**描述字段的 DTO 类型**（供字段声明、注解规则与覆盖度断言解析），第二个参数是本次负载；点号路径按 Map 层级逐段下钻：
+
+```java
+Map<String, Object> payload = Map.of("name", "Ada", "profile", Map.of("userNo", "u1"));
+SourceAccessor source = new MapAccessor(UserDto.class, payload);
+
+BeanMapper.of(user, source)
+        .requireAnyProvided()
+        .mapAll()
+        .apply();
+```
+
+要接入其它源形态（如 JSON 节点），自行实现 `SourceAccessor`。
 
 读方向（`BeanReader`）无条件全量拷贝，不适用三态判据。
 
@@ -101,7 +122,7 @@ UserDto dto = BeanReader.read(user, new UserDto())
 | `NestedPartial<Q, R>` | 子对象块，类型上没有 `apply()`，防止在块内提前结束整次写入 |
 | `BeanMapResource<R>` | 一次写入的结果（写入了哪些字段、各列要落库的值） |
 | `BeanReader<S, T>` | 读方向装配：同名直读 + 显式映射 |
-| `SourceAccessor` / `JavaBeanAccessor` | 源对象访问抽象与默认两态实现 |
+| `SourceAccessor` / `JavaBeanAccessor` / `MapAccessor` | 源对象访问抽象与 JavaBean、Map 两种内置实现 |
 | `DtoReflection`、`LambdaNames` | 属性路径反射读取、方法引用解析属性名 |
 | `BeanMapCoverage` | 覆盖度断言（由测试调用） |
 | `BeanMapException` / `BeanMapAbortException` | 声明期错误 / 策略中断 |
@@ -273,7 +294,7 @@ BeanMapper.of(user, source)
 - `sub` 不做环检测，自引用嵌套会栈溢出。
 - 子对象块的源值必须实现 `SourceAccessor`，否则声明期抛 `BeanMapException`。
 - 读方向 `mapAll()` 会跳过两侧类型不一致的属性，这类字段需显式 `map(...)`。
-- record / Map 源、集合元素级映射、多源合并、`ServiceLoader` 式自动加载、`labzen.yml` 配置均不在当前能力范围内。
+- 集合元素级映射、多源合并、`ServiceLoader` 式自动加载、`labzen.yml` 配置均不在当前能力范围内。
 - 1.0.0 未附带测试用例，使用方需自行编写覆盖度断言测试。
 
 ## 版本与发布

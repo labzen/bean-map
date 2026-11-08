@@ -4,6 +4,7 @@
 package cn.labzen.beanmap;
 
 import java.lang.reflect.Field;
+import java.lang.reflect.Method;
 import java.util.Map;
 import java.util.Objects;
 import java.util.concurrent.ConcurrentHashMap;
@@ -63,10 +64,23 @@ public final class DtoReflection {
   }
 
   private static Object read(Object source, String segment) {
+    Class<?> type = source.getClass();
+    if (type.isRecord()) {
+      // record 生成裸 accessor（x()），并可能位于强封装模块中，走公开组件方法而非私有字段
+      try {
+        Method accessor = type.getDeclaredMethod(segment);
+        accessor.setAccessible(true);
+        return accessor.invoke(source);
+      } catch (NoSuchMethodException e) {
+        throw new BeanMapException("record 组件不存在：{}", type.getSimpleName() + "." + segment);
+      } catch (ReflectiveOperationException e) {
+        throw new BeanMapException(e, "无法读取 record 组件：{}", type.getSimpleName() + "." + segment);
+      }
+    }
     try {
-      return field(source.getClass(), segment).get(source);
+      return field(type, segment).get(source);
     } catch (IllegalAccessException e) {
-      throw new BeanMapException(e, "无法读取属性：{}", source.getClass().getSimpleName() + "." + segment);
+      throw new BeanMapException(e, "无法读取属性：{}", type.getSimpleName() + "." + segment);
     }
   }
 

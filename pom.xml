@@ -13,7 +13,7 @@
 
   <artifactId>bean-map</artifactId>
   <packaging>jar</packaging>
-  <version>1.0.0</version>
+  <version>1.1.0</version>
   <name>Labzen.BeanMap</name>
   <description>通用对象映射基础库：两态全量拷贝 + 三态部分更新 + 覆盖度断言 + 字段封禁，作为 MapStruct 的功能替代。</description>
   <url>https://github.com/labzen/bean-map</url>

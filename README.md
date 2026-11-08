@@ -17,7 +17,7 @@ Maven（JDK 21+）：
 <dependency>
   <groupId>cn.labzen</groupId>
   <artifactId>bean-map</artifactId>
-  <version>1.0.0</version>
+  <version>1.1.0</version>
 </dependency>
 ```
 
@@ -391,8 +391,8 @@ BeanComposer.compose(view)
 - 子对象块的源值必须实现 `SourceAccessor`，否则声明期抛 `BeanMapException`。
 - 读方向 `mapAll()` 会跳过两侧类型不一致的属性，这类字段需显式 `map(...)`。
 - 配置文件驱动（如 `labzen.yml`）与 `ServiceLoader` 式自动加载不在当前能力范围内；默认策略由 `BeanMapConfiguration` 按入口显式传入。
-- 1.0.0 未附带测试用例，使用方需自行编写覆盖度断言测试。
+- 库内未附带测试用例，使用方需自行编写覆盖度断言测试。
 
 ## 版本与发布
 
-`cn.labzen:bean-map:1.0.0` 已发布至 Maven Central，该版本不可覆盖；当前源码能力以本文件为准，后续发布需提升版本号。parent 为 `cn.labzen:parent:21.3`（统一 import `labzen-bom:2.3`），JDK 21，Apache License 2.0。源码仓库：`git@github.com:labzen/bean-map.git`。
+`cn.labzen:bean-map:1.1.0` 已发布至 Maven Central，对应本仓库当前源码能力；`1.0.0` 为首个发布版本。Central 版本不可覆盖，后续发布需提升版本号。parent 为 `cn.labzen:parent:21.3`（统一 import `labzen-bom:2.3`），JDK 21，Apache License 2.0。源码仓库：`git@github.com:labzen/bean-map.git`。

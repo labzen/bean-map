@@ -108,6 +108,21 @@ public final class BeanMapper<P> extends PartialChain<P, P> {
   }
 
   /**
+   * 应用一组编程式默认策略（链首声明，作用于本次映射的全部字段）。
+   *
+   * <p>
+   * 配置对象承载类型转换器、中断扩展点与实例化策略；它与各 {@code withXxx(...)} 声明按调用顺序生效，后声明者覆盖先声明者。
+   *
+   * @param configuration
+   *          映射配置，不能为空
+   */
+  public BeanMapper<P> withConfiguration(BeanMapConfiguration configuration) {
+    Objects.requireNonNull(configuration, "映射配置不能为空");
+    configuration.applyTo(state);
+    return this;
+  }
+
+  /**
    * 按声明顺序执行全部字段，返回本次写入的结果（{@link BeanMapResource}）； 客户端的值不满足 {@code required} / {@code
    * notClearable} 时默认抛 {@code BeanMapAbortException}（4xx），中断异常可由 {@link AbortHandler} 按入口替换
    */

@@ -124,6 +124,19 @@ public final class BeanComposer<T> {
   }
 
   /**
+   * 应用一组编程式默认策略：类型转换器、中断扩展点与冲突策略。
+   *
+   * <p>
+   * 它与 {@code conflict(...)} 及各 {@code withXxx(...)} 声明按调用顺序生效，后声明者覆盖先声明者。
+   */
+  public BeanComposer<T> withConfiguration(BeanMapConfiguration configuration) {
+    Objects.requireNonNull(configuration, "映射配置不能为空");
+    configuration.applyTo(state);
+    this.policy = configuration.conflictPolicy();
+    return this;
+  }
+
+  /**
    * 汇总各源产出的值、裁决冲突并写入目标，返回同一个目标实例
    */
   public T apply() {

@@ -124,6 +124,7 @@ UserDto dto = BeanReader.read(user, new UserDto())
 | `BeanReader<S, T>` | 读方向装配：同名直读 + 显式映射 |
 | `BeanComposer<T>` | 多源合并：聚合多个源到同一目标，按冲突策略裁决同名字段 |
 | `ConflictPolicy` | 多源合并的冲突裁决策略 |
+| `BeanMapConfiguration` | 编程式默认策略集合，经 `withConfiguration(...)` 按入口传入 |
 | `SourceAccessor` / `JavaBeanAccessor` / `MapAccessor` | 源对象访问抽象与 JavaBean、Map 两种内置实现 |
 | `DtoReflection`、`LambdaNames` | 属性路径反射读取、方法引用解析属性名 |
 | `BeanMapCoverage` | 覆盖度断言（由测试调用） |
@@ -150,6 +151,7 @@ UserDto dto = BeanReader.read(user, new UserDto())
 | `withConversionService(cs)` | 链首声明，指定本次写入使用的 `ConversionService`；默认 Spring 共享实例 |
 | `withAbortHandler(handler)` | 链首声明，指定本次写入的中断处理扩展点；默认抛 `BeanMapAbortException` |
 | `withInstantiationStrategy(s)` | 链首声明，指定元素级映射的实例化策略 |
+| `withConfiguration(config)` | 链首声明，一次应用类型转换器、中断扩展点、实例化策略与冲突策略 |
 | `element(...)` / `ignoreNullElement()` | 字段级声明，逐元素转换容器值并控制 null 元素 |
 | `apply()` | 按声明顺序执行，返回 `BeanMapResource<R>` |
 
@@ -353,13 +355,42 @@ BeanMapper.of(user, source)
 
 `AbortHandler` 返回本次中断要抛出的异常，由库在中断点执行 `throw`；默认实现为 `AbortHandler.THROWING`，返回 `BeanMapAbortException`，返回空时回退到默认异常。作用域为单次写入，与 `withConversionService(...)` 一致。
 
+## 编程式配置
+
+`BeanMapConfiguration` 把一次映射的默认策略收在一个显式构造的对象里：类型转换器、中断扩展点、实例化策略与多源冲突策略。配置对象由调用方创建、可复用于多条链，经 `withConfiguration(...)` 按入口传入；库不读取 `labzen.yml` 等配置文件，不维护全局默认状态，也不做 `ServiceLoader` 式自动加载。
+
+```java
+BeanMapConfiguration config = BeanMapConfiguration.builder()
+        .conversionService(conversion)
+        .abortHandler((code, message) -> new MyBusinessException(code, message))
+        .instantiation(type -> myFactory.create(type))
+        .conflict(ConflictPolicy.firstWins())
+        .build();
+
+BeanMapper.of(user, source).withConfiguration(config).mapAll().apply();
+
+BeanComposer.compose(view)
+        .withConfiguration(config)
+        .from(new JavaBeanAccessor(user))
+        .apply();
+```
+
+| 配置项 | 类型 | 默认值 | 作用链 |
+|---|---|---|---|
+| `conversionService` | `ConversionService` | Spring `DefaultConversionService` 共享实例 | `BeanMapper` / `BeanComposer` |
+| `abortHandler` | `AbortHandler` | `AbortHandler.THROWING` | `BeanMapper` / `BeanComposer` |
+| `instantiation` | `InstantiationStrategy` | 无参构造器 | `BeanMapper` |
+| `conflict` | `ConflictPolicy` | `lastWins()` | `BeanComposer` |
+
+`BeanMapConfiguration.defaults()` 返回库内默认策略集合。`withConfiguration(...)` 与各 `withXxx(...)` / `conflict(...)` 按调用顺序生效，后声明者覆盖先声明者；读方向 `BeanReader` 不做隐式转换与策略中断，不使用该配置。
+
 ## 边界与约束
 
 - 字段取值与写入走反射，转换走链上的 `ConversionService`（默认 Spring 共享实例，可按入口替换），运行时慢于生成代码；高吞吐批量映射需评估。
 - `sub` 不做环检测，自引用嵌套会栈溢出。
 - 子对象块的源值必须实现 `SourceAccessor`，否则声明期抛 `BeanMapException`。
 - 读方向 `mapAll()` 会跳过两侧类型不一致的属性，这类字段需显式 `map(...)`。
-- `ServiceLoader` 式自动加载、`labzen.yml` 配置不在当前能力范围内。
+- 配置文件驱动（如 `labzen.yml`）与 `ServiceLoader` 式自动加载不在当前能力范围内；默认策略由 `BeanMapConfiguration` 按入口显式传入。
 - 1.0.0 未附带测试用例，使用方需自行编写覆盖度断言测试。
 
 ## 版本与发布

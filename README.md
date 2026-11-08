@@ -7,7 +7,7 @@
 ![GitHub](https://img.shields.io/github/license/labzen/bean-map)
 ![JDK](https://img.shields.io/badge/JDK-21-blue)
 
-通用对象映射基础库：三态部分更新、两态全量读写、覆盖度断言、入口级字段封禁。字段声明基于方法引用，属性名在编译期校验，避免字符串拼写错误导致的静默漏写。
+通用对象映射基础库：三态部分更新、两态全量读写、多源合并、覆盖度断言、入口级字段封禁。字段声明基于方法引用，属性名在编译期校验，避免字符串拼写错误导致的静默漏写。
 
 ## Installation
 
@@ -122,6 +122,8 @@ UserDto dto = BeanReader.read(user, new UserDto())
 | `NestedPartial<Q, R>` | 子对象块，类型上没有 `apply()`，防止在块内提前结束整次写入 |
 | `BeanMapResource<R>` | 一次写入的结果（写入了哪些字段、各列要落库的值） |
 | `BeanReader<S, T>` | 读方向装配：同名直读 + 显式映射 |
+| `BeanComposer<T>` | 多源合并：聚合多个源到同一目标，按冲突策略裁决同名字段 |
+| `ConflictPolicy` | 多源合并的冲突裁决策略 |
 | `SourceAccessor` / `JavaBeanAccessor` / `MapAccessor` | 源对象访问抽象与 JavaBean、Map 两种内置实现 |
 | `DtoReflection`、`LambdaNames` | 属性路径反射读取、方法引用解析属性名 |
 | `BeanMapCoverage` | 覆盖度断言（由测试调用） |
@@ -207,6 +209,42 @@ BeanMapper.of(domain, source)
 
 `InstantiationStrategy` 的默认实现走无参构造器，record / 不可变目标由调用方按入口注入自定义实现。库不提供元素映射器注册表，转换规则由链上声明或 `ConversionService` 决定。
 
+## 多源合并
+
+`BeanComposer` 把多个源产出的同名属性聚合进一个目标对象。每个 `from(...)` 源先产出局部结果，`apply()` 汇总后按冲突策略裁决同名字段，再统一写入；目标上没有被任何源产出的属性保持原值。
+
+```java
+import static cn.labzen.beanmap.ConflictPolicy.lastWins;
+
+UserView view = BeanComposer.compose(new UserView())
+        .from(new JavaBeanAccessor(user))
+        .from(new JavaBeanAccessor(profile))
+        .from(new MapAccessor(ExtraDto.class, extra), "remark")
+        .excludes("internalNote")
+        .conflict(lastWins())
+        .apply();
+```
+
+| 声明 | 作用 |
+|---|---|
+| `compose(target)` | 开启一次合并，`apply()` 就地写入并返回同一个目标实例 |
+| `from(source)` | 该源产出「源类型字段 ∩ 目标类型字段」中所有出现过的属性 |
+| `from(source, properties...)` | 限定该源只产出给定的目标属性；属性不存在时声明期即报错 |
+| `excludes(properties...)` | 禁止任何源写入这些目标属性 |
+| `conflict(policy)` | 同名字段的冲突裁决策略，默认 `lastWins()` |
+| `withConversionService(cs)` / `withAbortHandler(h)` | 本次合并的类型转换器与中断扩展点 |
+| `apply()` | 汇总、裁决、写入 |
+
+| 策略 | 行为 |
+|---|---|
+| `lastWins()` | 保留最后声明的源产出的值（默认） |
+| `firstWins()` | 保留最先声明的源产出的值 |
+| `throwOnConflict()` | 以 `FIELD_CONFLICT`（409）中断，消息列出参与写入的源序号 |
+
+JavaBean / POJO 源按两态处理（字段视为全部出现）；`MapAccessor` 等三态源只产出 `isProvided(...)` 为 `true` 的属性，未出现的属性不参与合并，也不参与冲突判定。写入按 setter 参数类型做隐式转换，无法转换时以 `TYPE_MISMATCH` 中断；目标字段标 `@BeanUnmapped` 时不参与合并。
+
+多源合并只裁决字段整体值，不做子字段级跨源合并，也不做聚合覆盖度断言；覆盖度仍由 `BeanMapCoverage.verify(...)` 在测试期校验。
+
 ## 写入结果
 
 | 方法 | 作用 |
@@ -289,7 +327,7 @@ public interface UserBeanMap {
 | 异常 | 场景 |
 |---|---|
 | `BeanMapException` | 声明期校验失败、反射读写失败、结果查询非法；支持 `{}` 占位符格式化 |
-| `BeanMapAbortException` | 策略中断（`requireAnyProvided`、`required`、`notClearable`、类型转换失败等） |
+| `BeanMapAbortException` | 策略中断（`requireAnyProvided`、`required`、`notClearable`、类型转换失败、多源冲突等） |
 
 `AbortCode` 枚举给出中断语义码及等价的整型状态码：
 
@@ -299,7 +337,7 @@ public interface UserBeanMap {
 | `REQUIRED` | 400 | 必填字段没有可用值 |
 | `NOT_CLEARABLE` | 400 | 不可清空字段被显式传 null |
 | `TYPE_MISMATCH` | 400 | 值无法转换或写入目标类型 |
-| `FIELD_CONFLICT` | 409 | 多源合并时同一字段出现冲突 |
+| `FIELD_CONFLICT` | 409 | `throwOnConflict()` 下同一字段被多处源写入 |
 
 `BeanMapAbortException#getAbortCode()` 返回语义码，`getCode()` 返回等价整型码。库本身不依赖任何 Web 框架，整型码由上层（如 `cn.labzen:web`）映射为 HTTP 状态。
 
@@ -321,9 +359,9 @@ BeanMapper.of(user, source)
 - `sub` 不做环检测，自引用嵌套会栈溢出。
 - 子对象块的源值必须实现 `SourceAccessor`，否则声明期抛 `BeanMapException`。
 - 读方向 `mapAll()` 会跳过两侧类型不一致的属性，这类字段需显式 `map(...)`。
-- 多源合并、`ServiceLoader` 式自动加载、`labzen.yml` 配置均不在当前能力范围内。
+- `ServiceLoader` 式自动加载、`labzen.yml` 配置不在当前能力范围内。
 - 1.0.0 未附带测试用例，使用方需自行编写覆盖度断言测试。
 
 ## 版本与发布
 
-`cn.labzen:bean-map:1.0.0` 已发布至 Maven Central；本仓库当前源码另包含链级类型转换器注入点、中断语义码与中断处理扩展点，发布前需提升版本号。parent 为 `cn.labzen:parent:21.3`（统一 import `labzen-bom:2.3`），JDK 21，Apache License 2.0。源码仓库：`git@github.com:labzen/bean-map.git`。
+`cn.labzen:bean-map:1.0.0` 已发布至 Maven Central，该版本不可覆盖；当前源码能力以本文件为准，后续发布需提升版本号。parent 为 `cn.labzen:parent:21.3`（统一 import `labzen-bom:2.3`），JDK 21，Apache License 2.0。源码仓库：`git@github.com:labzen/bean-map.git`。

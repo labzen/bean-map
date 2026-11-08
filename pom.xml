@@ -15,7 +15,7 @@
   <packaging>jar</packaging>
   <version>1.1.0</version>
   <name>Labzen.BeanMap</name>
-  <description>通用对象映射基础库：两态全量拷贝 + 三态部分更新 + 覆盖度断言 + 字段封禁，作为 MapStruct 的功能替代。</description>
+  <description>通用对象映射基础库：三态部分更新、两态全量读写、多源合并与覆盖度断言，面向管理后台等中低吞吐场景。</description>
   <url>https://github.com/labzen/bean-map</url>
 
   <licenses>
@@ -106,6 +106,15 @@
       <plugin>
         <groupId>org.sonatype.central</groupId>
         <artifactId>central-publishing-maven-plugin</artifactId>
+      </plugin>
+
+      <!-- 测试失败即中止构建 -->
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-surefire-plugin</artifactId>
+        <configuration>
+          <testFailureIgnore>false</testFailureIgnore>
+        </configuration>
       </plugin>
     </plugins>
   </build>

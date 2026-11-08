@@ -3,6 +3,8 @@
  */
 package cn.labzen.beanmap;
 
+import cn.labzen.beanmap.annotation.BeanUnmapped;
+
 import java.lang.reflect.Field;
 import java.lang.reflect.Method;
 import java.util.ArrayList;
@@ -108,7 +110,7 @@ public final class BeanReader<S, T> {
   public BeanReader<S, T> mapAll() {
     for (Field field : BeanMapCoverage.fieldsOf(target.getClass())) {
       String name = field.getName();
-      if (ignored.contains(name) || declared.contains(name)) {
+      if (field.isAnnotationPresent(BeanUnmapped.class) || ignored.contains(name) || declared.contains(name)) {
         continue;
       }
       Method getter = findGetter(source.getClass(), name);

@@ -6,6 +6,7 @@ package cn.labzen.beanmap;
 import java.io.Writer;
 import java.util.List;
 import java.util.Set;
+import java.util.stream.Collectors;
 
 import javax.annotation.processing.AbstractProcessor;
 import javax.annotation.processing.Filer;
@@ -16,8 +17,10 @@ import javax.annotation.processing.SupportedSourceVersion;
 import javax.lang.model.SourceVersion;
 import javax.lang.model.element.Element;
 import javax.lang.model.element.ExecutableElement;
+import javax.lang.model.element.Modifier;
 import javax.lang.model.element.TypeElement;
 import javax.lang.model.element.VariableElement;
+import javax.lang.model.type.MirroredTypeException;
 import javax.lang.model.type.TypeKind;
 import javax.lang.model.type.TypeMirror;
 import javax.tools.Diagnostic;
@@ -77,8 +80,18 @@ public class BeanMapProcessor extends AbstractProcessor {
 
     StringBuilder body = new StringBuilder();
     for (Element enclosed : iface.getEnclosedElements()) {
-      if (enclosed instanceof ExecutableElement method) {
+      if (!(enclosed instanceof ExecutableElement method)) {
+        continue;
+      }
+      Set<Modifier> modifiers = method.getModifiers();
+      if (modifiers.contains(Modifier.STATIC) || modifiers.contains(Modifier.DEFAULT)) {
+        continue;
+      }
+      try {
         body.append(generateMethod(method));
+      } catch (RuntimeException e) {
+        processingEnv.getMessager().printMessage(Diagnostic.Kind.ERROR,
+                "BeanMapProcessor 处理方法 " + method.getSimpleName() + " 失败：" + e, method);
       }
     }
 
@@ -127,78 +140,62 @@ public class BeanMapProcessor extends AbstractProcessor {
     String name = method.getSimpleName().toString();
     List<? extends VariableElement> params = method.getParameters();
     boolean returnsDomain = method.getReturnType().getKind() != TypeKind.VOID;
+    String paramList = params.stream()
+            .map(p -> typeName(p.asType()) + " " + p.getSimpleName())
+            .collect(Collectors.joining(", "));
+    String returnType = returnsDomain ? typeName(method.getReturnType()) : "void";
 
     VariableElement domainParam = params.stream()
             .filter(p -> p.getAnnotation(BeanTarget.class) != null)
             .findFirst().orElse(null);
 
-    if (domainParam != null && !returnsDomain) {
-      // updateDomain(<D> dto, @BeanTarget <P> domain)
-      int idx = params.indexOf(domainParam);
-      VariableElement dtoParam = params.get(idx == 0 ? 1 : 0);
-      String dtoType = typeName(dtoParam.asType());
-      String domainType = typeName(domainParam.asType());
+    if (domainParam != null && !returnsDomain && params.size() == 2) {
+      VariableElement dtoParam = params.stream().filter(p -> p != domainParam).findFirst().orElseThrow();
       String domainName = domainParam.getSimpleName().toString();
       String dtoName = dtoParam.getSimpleName().toString();
       return """
               @Override
-              public void %s(%s %s, %s %s) {
+              public void %s(%s) {
                 BeanMapper.of(%s, new JavaBeanAccessor(%s)).mapAll().apply();
               }
 
-              """.formatted(name, dtoType, dtoName, domainType, domainName, domainName, dtoName);
-    } else if (name.startsWith("toDomain") && params.size() == 1) {
-      // toDomain(<D> dto)
-      VariableElement dtoParam = params.get(0);
-      String dtoType = typeName(dtoParam.asType());
+              """.formatted(name, paramList, domainName, dtoName);
+    } else if (name.startsWith("toDomain") && params.size() == 1 && returnsDomain) {
       String domainType = typeName(method.getReturnType());
-      String dtoName = dtoParam.getSimpleName().toString();
+      String dtoName = params.get(0).getSimpleName().toString();
       return """
               @Override
-              public %s %s(%s %s) {
+              public %s %s(%s) {
                 %s domain = new %s();
                 BeanMapper.of(domain, new JavaBeanAccessor(%s)).mapAll().apply();
                 return domain;
               }
 
-              """.formatted(domainType, name, dtoType, dtoName, domainType, domainType, dtoName);
+              """.formatted(domainType, name, paramList, domainType, domainType, dtoName);
     } else if (name.equals("copyDto") && params.size() == 2 && !returnsDomain) {
-      // copyDto(<D> source, <D> target)：Dto 同类型拷贝，BeanReader 直接覆盖同名属性
-      VariableElement srcParam = params.get(0);
-      VariableElement tgtParam = params.get(1);
-      String srcType = typeName(srcParam.asType());
-      String srcName = srcParam.getSimpleName().toString();
-      String tgtName = tgtParam.getSimpleName().toString();
+      String srcName = params.get(0).getSimpleName().toString();
+      String tgtName = params.get(1).getSimpleName().toString();
       return """
               @Override
-              public void %s(%s %s, %s %s) {
+              public void %s(%s) {
                 BeanReader.read(%s, %s).mapAll().apply();
               }
 
-              """.formatted(name, srcType, srcName, srcType, tgtName, srcName, tgtName);
+              """.formatted(name, paramList, srcName, tgtName);
     } else if (params.size() == 1 && returnsDomain) {
-      // 读方向：toDto(Domain) / toChain(Domain)
-      return generateRead(method);
+      return generateRead(method, paramList);
     } else {
-      StringBuilder paramList = new StringBuilder();
-      for (int i = 0; i < params.size(); i++) {
-        if (i > 0) {
-          paramList.append(", ");
-        }
-        paramList.append(typeName(params.get(i).asType())).append(' ').append(params.get(i).getSimpleName());
-      }
-      String ret = returnsDomain ? typeName(method.getReturnType()) : "void";
       return """
               @Override
               public %s %s(%s) {
                 throw new UnsupportedOperationException("@BeanMap 暂不支持的方法形态：" + %s);
               }
 
-              """.formatted(ret, name, paramList, "\"" + name + "\"");
+              """.formatted(returnType, name, paramList, "\"" + name + "\"");
     }
   }
 
-  private String generateRead(ExecutableElement method) {
+  private String generateRead(ExecutableElement method, String paramList) {
     String name = method.getSimpleName().toString();
     VariableElement domainParam = method.getParameters().get(0);
     String domainType = typeName(domainParam.asType());
@@ -217,10 +214,11 @@ public class BeanMapProcessor extends AbstractProcessor {
       String target = mf.target().isEmpty() ? mf.source() : mf.target();
       String getter = resolveGetter(domainType, source);
       String setter = retType + "::set" + cap(target);
-      if (mf.converter() != void.class) {
+      String converterType = converterTypeName(mf);
+      if (converterType != null) {
         chain.append("      .map(\"").append(target).append("\", ")
                 .append(getter).append(", ").append(setter)
-                .append(", new ").append(mf.converter().getName()).append("())\n");
+                .append(", new ").append(converterType).append("())\n");
       } else {
         chain.append("      .map(\"").append(target).append("\", ")
                 .append(getter).append(", ").append(setter).append(")\n");
@@ -230,13 +228,25 @@ public class BeanMapProcessor extends AbstractProcessor {
 
     return """
             @Override
-            public %s %s(%s %s) {
+            public %s %s(%s) {
               return BeanReader.read(%s, new %s())
             %s
                   .apply();
             }
 
-            """.formatted(retType, name, domainType, domainName, domainName, retType, chain.toString());
+            """.formatted(retType, name, paramList, domainName, retType, chain.toString());
+  }
+
+  /**
+   * 读取 converter 的 Class 成员：编译期类型不可用时代理会抛 MirroredTypeException，从 TypeMirror 取类型名
+   */
+  private String converterTypeName(BeanMapField mf) {
+    try {
+      Class<?> converter = mf.converter();
+      return void.class.equals(converter) ? null : converter.getName();
+    } catch (MirroredTypeException e) {
+      return e.getTypeMirror().toString();
+    }
   }
 
   private BeanMapField[] readBeanMapFields(ExecutableElement method) {

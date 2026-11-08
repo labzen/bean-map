@@ -21,7 +21,7 @@ Maven（JDK 21+）：
 </dependency>
 ```
 
-依赖 `cn.labzen:spring`、`cn.labzen:tool`、`cn.labzen:logger`；字段隐式类型转换使用 Spring `ConversionService`（`spring-core`）。使用 APT 生成时，生成的 `*Impl` 类带 `@Component`，消费方需提供 `spring-context`。
+POM 直接依赖 `cn.labzen:spring`、`cn.labzen:tool`、`cn.labzen:logger`，源码实际使用 `spring-core` 的 `ConversionService` 做隐式类型转换。APT 生成类的注册方式由 `-Abeanmap.registry` 决定：默认 `spring` 模式生成带 `@Component` 的类（消费方需提供 `spring-context`），`spi` 模式生成不带注册注解的普通 `public` 类。
 
 ## 三态语义
 
@@ -52,7 +52,7 @@ public interface SourceAccessor {
 | `JavaBeanAccessor` | JavaBean / POJO / record | 两态，`isProvided` 恒返回 `true` |
 | `MapAccessor` | `Map<String, Object>` 负载 | 三态，按 key 是否存在判定 |
 
-`JavaBeanAccessor` 对普通对象走字段反射、对 record 走组件 accessor；构造时校验源形状，Map、数组、标量等不具备可解析形状的对象在声明期即抛 `BeanMapException` 并给出可读提示，不静默退化。
+`JavaBeanAccessor` 对普通对象走字段反射、对 record 走组件 accessor；构造时校验源形状，Map、数组、标量等不具备可解析形状的对象在声明期即抛 `BeanMapException` 并给出可读提示，不静默退化。record 组件 accessor 用于写方向的 `DtoReflection` 取值；读方向 `BeanReader.mapAll()` 按 public getter 查找，见「边界与约束」。
 
 `MapAccessor` 的第一个参数是**描述字段的 DTO 类型**（供字段声明、注解规则与覆盖度断言解析），第二个参数是本次负载；点号路径按 Map 层级逐段下钻：
 
@@ -163,7 +163,7 @@ UserDto dto = BeanReader.read(user, new UserDto())
 | 值处理 | `trim`、`withConverter`、`withDefault` |
 | 约束 | `required`、`notClearable`、`nullable` |
 
-处理管线：缺省分流 → `ignore*` → `withDefault` / `notClearable` → `trim` → 转换 → `required` → 写入。`withDefault` 与 `notClearable` 互斥；按值判定的修饰符作用于转换前的 DTO 侧原值，`required(...)` 的谓词作用于转换后的值。
+处理管线：缺省分流 → `ignore*` → `withDefault` / `notClearable` → `trim` → 转换 → `required` → 写入。`withDefault` 与 `notClearable` 互斥；按值判定的修饰符作用于转换前的 DTO 侧原值，`required(...)` 的谓词作用于转换后的值。显式 `null` 不经过 `withConverter` 与 `element(...)`，按 `nullable()` / `notClearable()` 的规则落为 null。
 
 DTO 注解可作为修饰符的默认值，生效优先级为：**链上显式调用 > 字段注解 > 类注解 > 默认关闭**。
 
@@ -198,7 +198,7 @@ BeanMapper.of(domain, source)
 
 | 声明 | 作用 |
 |---|---|
-| `element(Function<Object, Object>)` | 逐元素转换；Iterable / Set 保持容器语义，Map 转换 value 并保留 key，数组按 List 语义返回 |
+| `element(Function<Object, Object>)` | 逐元素转换；Iterable / Set 保持容器语义，Map 转换 value 并保留 key，数组按 List 语义返回（目标 setter 需能接收 `List`） |
 | `element(Class<S>, Class<T>)` | 逐元素映射：优先走链上 `ConversionService`，无法转换时按 `InstantiationStrategy` 创建目标实例并做同名直读 |
 | `ignoreNullElement()` | 跳过容器中的 null 元素；未声明时保留 |
 | `withInstantiationStrategy(...)` | 链首注入实例化策略，默认反射调用无参构造器 |
@@ -231,7 +231,7 @@ UserView view = BeanComposer.compose(new UserView())
 |---|---|
 | `compose(target)` | 开启一次合并，`apply()` 就地写入并返回同一个目标实例 |
 | `from(source)` | 该源产出「源类型字段 ∩ 目标类型字段」中所有出现过的属性 |
-| `from(source, properties...)` | 限定该源只产出给定的目标属性；属性不存在时声明期即报错 |
+| `from(source, properties...)` | 限定该源只产出给定的目标属性；属性不存在或与 `excludes(...)` 冲突时，在 `apply()` 汇总阶段抛 `BeanMapException` |
 | `excludes(properties...)` | 禁止任何源写入这些目标属性 |
 | `conflict(policy)` | 同名字段的冲突裁决策略，默认 `lastWins()` |
 | `withConversionService(cs)` / `withAbortHandler(h)` | 本次合并的类型转换器与中断扩展点 |
@@ -283,7 +283,7 @@ public interface UserBeanMap {
 }
 ```
 
-编译期在同包生成 `UserBeanMapImpl`（带 `@Component`），方法体委托给编程式 API：
+编译期在同包生成 `UserBeanMapImpl`（默认 `spring` 模式带 `@Component`），方法体委托给编程式 API：
 
 | 方法形态 | 识别方式 | 生成逻辑 |
 |---|---|---|
@@ -389,7 +389,7 @@ BeanComposer.compose(view)
 - 字段取值与写入走反射，转换走链上的 `ConversionService`（默认 Spring 共享实例，可按入口替换），运行时慢于生成代码；高吞吐批量映射需评估。
 - `sub` 不做环检测，自引用嵌套会栈溢出。
 - 子对象块的源值必须实现 `SourceAccessor`，否则声明期抛 `BeanMapException`。
-- 读方向 `mapAll()` 会跳过两侧类型不一致的属性，这类字段需显式 `map(...)`。
+- 读方向 `mapAll()` 会跳过两侧类型不一致、源对象没有 public `getXxx` / `isXxx` 的属性（含 record 裸 accessor）、以及目标字段上的 `@BeanUnmapped`；被跳过的字段需显式 `map(...)` 或保持不写。
 - 配置文件驱动（如 `labzen.yml`）与 `ServiceLoader` 式自动加载不在当前能力范围内；默认策略由 `BeanMapConfiguration` 按入口显式传入。
 - 库内未附带测试用例，使用方需自行编写覆盖度断言测试。
 

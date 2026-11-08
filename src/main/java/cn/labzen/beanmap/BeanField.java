@@ -516,6 +516,9 @@ public final class BeanField<P, R, T> extends PartialChain<P, R> {
 
     Object raw = provided ? source.getValue(path) : null;
     if (isIgnored(raw)) {
+      if (required) {
+        throw requestError(AbortCode.REQUIRED, requiredMessage == null ? "必须有值" : requiredMessage);
+      }
       return;
     }
     if (notClearable && provided && raw == null) {

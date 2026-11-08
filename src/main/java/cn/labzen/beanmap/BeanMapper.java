@@ -4,6 +4,7 @@
 package cn.labzen.beanmap;
 
 import cn.labzen.beanmap.annotation.BeanUnmapped;
+import org.springframework.core.convert.ConversionService;
 
 import java.lang.reflect.Field;
 import java.util.Objects;
@@ -59,6 +60,21 @@ public final class BeanMapper<P> extends PartialChain<P, P> {
   public BeanMapper<P> requireAnyProvided() {
     // 304 NOT_MODIFIED：语义固定为"没有改动"，消息取状态短语，与框架无数据响应同形
     state.requireAnyProvided(304, "Not Modified");
+    return this;
+  }
+
+  /**
+   * 指定本次写入使用的类型转换器（链首声明，作用于本次映射的全部字段）。
+   *
+   * <p>
+   * 未指定时使用 Spring {@code DefaultConversionService} 的共享实例。要扩展类型转换规则，
+   * 向 {@code ConfigurableConversionService} 注册 {@code Converter} 后传入即可。
+   *
+   * @param conversionService
+   *          类型转换器，不能为空
+   */
+  public BeanMapper<P> withConversionService(ConversionService conversionService) {
+    state.conversionService(conversionService);
     return this;
   }
 

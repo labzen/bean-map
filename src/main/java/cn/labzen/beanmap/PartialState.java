@@ -3,10 +3,13 @@
  */
 package cn.labzen.beanmap;
 
+import org.springframework.core.convert.ConversionService;
+import org.springframework.core.convert.support.DefaultConversionService;
+
 import java.util.*;
 
 /**
- * 一次写入的作用域：参与写入的全部字段声明 + 写入级断言 + 写入结果
+ * 一次写入的作用域：参与写入的全部字段声明 + 写入级断言 + 类型转换器 + 写入结果
  */
 final class PartialState {
 
@@ -16,6 +19,7 @@ final class PartialState {
 
   private Object rootDomain;
   private SourceAccessor rootDto;
+  private ConversionService conversionService = DefaultConversionService.getSharedInstance();
   private boolean requireAnyProvided;
   private int requireAnyProvidedCode;
   private String requireAnyProvidedMessage;
@@ -86,6 +90,20 @@ final class PartialState {
       }
     }
     return declared;
+  }
+
+  /**
+   * 指定本次写入使用的类型转换器
+   */
+  void conversionService(ConversionService conversionService) {
+    this.conversionService = Objects.requireNonNull(conversionService, "类型转换器不能为空");
+  }
+
+  /**
+   * 本次写入使用的类型转换器（默认 Spring 共享实例）
+   */
+  ConversionService conversionService() {
+    return conversionService;
   }
 
   /**

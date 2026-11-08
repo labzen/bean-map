@@ -122,6 +122,7 @@ UserDto dto = BeanReader.read(user, new UserDto())
 | `sub(dtoGetter, domainGetter[, factory])` | 声明嵌套子对象块；子对象源值必须实现 `SourceAccessor` |
 | `anyProvided()` | 本链声明的字段里是否有任一在负载中出现 |
 | `requireAnyProvided()` | 写入级断言，无任何输入时以 `304` 中断 |
+| `withConversionService(cs)` | 链首声明，指定本次写入使用的 `ConversionService`；默认 Spring 共享实例 |
 | `apply()` | 按声明顺序执行，返回 `BeanMapResource<R>` |
 
 字段修饰符：
@@ -135,6 +136,25 @@ UserDto dto = BeanReader.read(user, new UserDto())
 处理管线：缺省分流 → `ignore*` → `withDefault` / `notClearable` → `trim` → 转换 → `required` → 写入。`withDefault` 与 `notClearable` 互斥；按值判定的修饰符作用于转换前的 DTO 侧原值，`required(...)` 的谓词作用于转换后的值。
 
 DTO 注解可作为修饰符的默认值，生效优先级为：**链上显式调用 > 字段注解 > 类注解 > 默认关闭**。
+
+## 类型转换
+
+字段两侧类型不同时，若未用 `withConverter(...)` 显式给出转换器，库按 setter 参数类型做隐式转换。转换器由本次写入作用域提供，默认使用 Spring `DefaultConversionService` 的共享实例。
+
+替换或扩展转换规则时，在链首传入自定义的 `ConversionService`：
+
+```java
+GenericConversionService conversion = new GenericConversionService();
+DefaultConversionService.addDefaultConverters(conversion);
+conversion.addConverter(String.class, Locale.class, Locale::forLanguageTag);
+
+BeanMapper.of(user, source)
+        .withConversionService(conversion)
+        .mapAll()
+        .apply();
+```
+
+`withConversionService(...)` 只作用于本次映射，不同入口可使用不同的转换规则。扩展规则走 Spring 原生的 `Converter` 注册机制，库不引入自有 SPI 接口，也不增加依赖。
 
 ## 写入结果
 
@@ -202,7 +222,7 @@ public interface UserBeanMap {
 
 ## 边界与约束
 
-- 字段取值与写入走反射，转换走 Spring `ConversionService`，运行时慢于生成代码；高吞吐批量映射需评估。
+- 字段取值与写入走反射，转换走链上的 `ConversionService`（默认 Spring 共享实例，可按入口替换），运行时慢于生成代码；高吞吐批量映射需评估。
 - `sub` 不做环检测，自引用嵌套会栈溢出。
 - 子对象块的源值必须实现 `SourceAccessor`，否则声明期抛 `BeanMapException`。
 - 读方向 `mapAll()` 会跳过两侧类型不一致的属性，这类字段需显式 `map(...)`。
@@ -211,4 +231,4 @@ public interface UserBeanMap {
 
 ## 版本与发布
 
-`cn.labzen:bean-map:1.0.0` 发布至 Maven Central；parent 为 `cn.labzen:parent:21.3`（统一 import `labzen-bom:2.3`），JDK 21，Apache License 2.0。源码仓库：`git@github.com:labzen/bean-map.git`。
+`cn.labzen:bean-map:1.0.0` 已发布至 Maven Central；本仓库当前源码另包含链级类型转换器注入点，发布前需提升版本号。parent 为 `cn.labzen:parent:21.3`（统一 import `labzen-bom:2.3`），JDK 21，Apache License 2.0。源码仓库：`git@github.com:labzen/bean-map.git`。

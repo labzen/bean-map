@@ -6,7 +6,6 @@ package cn.labzen.beanmap;
 import cn.labzen.beanmap.annotation.BeanClearable;
 import cn.labzen.beanmap.annotation.BeanUnmappedBlank;
 import org.springframework.core.convert.ConversionService;
-import org.springframework.core.convert.support.DefaultConversionService;
 
 import java.io.Serializable;
 import java.lang.reflect.Field;
@@ -35,8 +34,6 @@ import java.util.function.Predicate;
  * 的谓词形参无法比对类型，两侧不同时直接拒绝）； {@code required(...)} 的谓词作用于<b>转换后</b>的值，按写入侧类型书写。
  */
 public final class BeanField<P, R, T> extends PartialChain<P, R> {
-
-  private static final ConversionService CONVERSION = DefaultConversionService.getSharedInstance();
 
   private final String path;
   private final ValueWriter writer;
@@ -585,8 +582,9 @@ public final class BeanField<P, R, T> extends PartialChain<P, R> {
     if (target == null || target.isInstance(value)) {
       return value;
     }
-    if (CONVERSION.canConvert(value.getClass(), target)) {
-      return CONVERSION.convert(value, target);
+    ConversionService conversion = state.conversionService();
+    if (conversion.canConvert(value.getClass(), target)) {
+      return conversion.convert(value, target);
     }
     throw requestError("值类型无法写入该字段：" + value.getClass().getSimpleName());
   }

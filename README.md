@@ -17,7 +17,7 @@ Maven（JDK 21+）：
 <dependency>
   <groupId>cn.labzen</groupId>
   <artifactId>bean-map</artifactId>
-  <version>1.1.1</version>
+  <version>1.2.0</version>
 </dependency>
 ```
 
@@ -428,4 +428,4 @@ BeanComposer.compose(view)
 
 ## 版本与发布
 
-`cn.labzen:bean-map:1.1.1` 为当前已发布版本；`1.0.0` 为首个发布版本。仓库 `main` 另含尚未发布的 `@BeanOp` / `MappingType` 显式形态分派，随 `1.2.0` 发布。Central 版本不可覆盖，后续发布需提升版本号。parent 为 `cn.labzen:parent:21.3`（统一 import `labzen-bom:2.3`），JDK 21，Apache License 2.0。源码仓库：`git@github.com:labzen/bean-map.git`。版本记录、版本策略与各版本升级注意事项见 `CHANGELOG.md`。
+`cn.labzen:bean-map:1.2.0` 已发布至 Maven Central，对应本仓库当前源码能力；`1.0.0` 为首个发布版本。`1.2.0` 引入 `@BeanOp` / `MappingType` 显式形态分派，用法见「APT 生成」。Central 版本不可覆盖，后续发布需提升版本号。parent 为 `cn.labzen:parent:21.3`（统一 import `labzen-bom:2.3`），JDK 21，Apache License 2.0。源码仓库：`git@github.com:labzen/bean-map.git`。版本记录、版本策略与各版本升级注意事项见 `CHANGELOG.md`。

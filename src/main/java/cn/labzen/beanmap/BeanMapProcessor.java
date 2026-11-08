@@ -1,0 +1,261 @@
+/*
+ * Copyright (c) 2021-2026 Labzen. All rights reserved.
+ */
+package cn.labzen.beanmap;
+
+import java.io.Writer;
+import java.util.List;
+import java.util.Set;
+
+import javax.annotation.processing.AbstractProcessor;
+import javax.annotation.processing.Filer;
+import javax.annotation.processing.RoundEnvironment;
+import javax.annotation.processing.SupportedAnnotationTypes;
+import javax.annotation.processing.SupportedSourceVersion;
+import javax.lang.model.SourceVersion;
+import javax.lang.model.element.Element;
+import javax.lang.model.element.ExecutableElement;
+import javax.lang.model.element.TypeElement;
+import javax.lang.model.element.VariableElement;
+import javax.lang.model.type.TypeKind;
+import javax.lang.model.type.TypeMirror;
+import javax.tools.Diagnostic;
+import javax.tools.JavaFileObject;
+
+/**
+ * 处理 {@link BeanMap} 注解，为映射接口生成实现类（{@code *BeanMapImpl}）。
+ *
+ * <p>
+ * 生成规则：
+ * <ul>
+ * <li>{@code toDomain(Dto)} —— 创建全量映射：new 出 domain 后同名直写（{@code BeanMapper#mapAll()}）；</li>
+ * <li>{@code updateDomain(Dto, @BeanTarget Domain)} —— 编辑映射：对传入 domain 就地同名直写；</li>
+ * <li>{@code copyDto(Dto, Dto)} —— DTO 同类型拷贝：{@link BeanReader#read(Object, Object)} 同名直读。</li>
+ * <li>{@code toDto(Domain)} / {@code toChain(Domain)} —— 读方向装配：{@link BeanReader#read(Object, Object)}
+ * 同名直读（{@code mapAll()}） + 方法上的 {@link BeanMapField} 显式映射（重命名 / 转换 / 忽略），二者并存。</li>
+ * </ul>
+ *
+ * <p>
+ * 生成代码统一委托给编程式 {@link BeanMapper} / {@link BeanReader}（字段管线、三态门控、 {@code @BeanUnmapped}/{@code @BeanClearable}
+ * 注解规则均由其承载），因此本处理器<b>不读取 domain/DTO 的字段</b>， 只解析映射接口的方法签名与 {@link BeanMapField} 声明，无需与 Lombok 抢占字段生成顺序。
+ *
+ * @since 2026-11-07
+ */
+@SupportedAnnotationTypes("cn.labzen.beanmap.BeanMap")
+@SupportedSourceVersion(SourceVersion.RELEASE_21)
+public class BeanMapProcessor extends AbstractProcessor {
+
+  @Override
+  public boolean process(Set<? extends TypeElement> annotations, RoundEnvironment roundEnv) {
+    for (TypeElement annotation : annotations) {
+      for (Element element : roundEnv.getElementsAnnotatedWith(annotation)) {
+        if (element instanceof TypeElement iface) {
+          generate(iface);
+        }
+      }
+    }
+    return true;
+  }
+
+  private void generate(TypeElement iface) {
+    String ifaceName = iface.getSimpleName().toString();
+    String pkg = processingEnv.getElementUtils().getPackageOf(iface).getQualifiedName().toString();
+    String implName = ifaceName + "Impl";
+
+    StringBuilder body = new StringBuilder();
+    for (Element enclosed : iface.getEnclosedElements()) {
+      if (enclosed instanceof ExecutableElement method) {
+        body.append(generateMethod(method));
+      }
+    }
+
+    String src = """
+            package %s;
+
+            import cn.labzen.beanmap.BeanMapper;
+            import cn.labzen.beanmap.BeanReader;
+            import cn.labzen.beanmap.JavaBeanAccessor;
+            import org.springframework.stereotype.Component;
+
+            @Component
+            public class %s implements %s {
+            %s
+            }
+            """.formatted(pkg, implName, ifaceName, body.toString());
+
+    try {
+      Filer filer = processingEnv.getFiler();
+      JavaFileObject file = filer.createSourceFile(pkg + "." + implName, iface);
+      try (Writer w = file.openWriter()) {
+        w.write(src);
+      }
+    } catch (Exception e) {
+      processingEnv.getMessager().printMessage(
+              Diagnostic.Kind.ERROR, "BeanMapProcessor 生成 " + implName + " 失败：" + e);
+    }
+  }
+
+  private String generateMethod(ExecutableElement method) {
+    String name = method.getSimpleName().toString();
+    List<? extends VariableElement> params = method.getParameters();
+    boolean returnsDomain = method.getReturnType().getKind() != TypeKind.VOID;
+
+    VariableElement domainParam = params.stream()
+            .filter(p -> p.getAnnotation(BeanTarget.class) != null)
+            .findFirst().orElse(null);
+
+    if (domainParam != null && !returnsDomain) {
+      // updateDomain(<D> dto, @BeanTarget <P> domain)
+      int idx = params.indexOf(domainParam);
+      VariableElement dtoParam = params.get(idx == 0 ? 1 : 0);
+      String dtoType = typeName(dtoParam.asType());
+      String domainType = typeName(domainParam.asType());
+      String domainName = domainParam.getSimpleName().toString();
+      String dtoName = dtoParam.getSimpleName().toString();
+      return """
+              @Override
+              public void %s(%s %s, %s %s) {
+                BeanMapper.of(%s, new JavaBeanAccessor(%s)).mapAll().apply();
+              }
+
+              """.formatted(name, dtoType, dtoName, domainType, domainName, domainName, dtoName);
+    } else if (name.startsWith("toDomain") && params.size() == 1) {
+      // toDomain(<D> dto)
+      VariableElement dtoParam = params.get(0);
+      String dtoType = typeName(dtoParam.asType());
+      String domainType = typeName(method.getReturnType());
+      String dtoName = dtoParam.getSimpleName().toString();
+      return """
+              @Override
+              public %s %s(%s %s) {
+                %s domain = new %s();
+                BeanMapper.of(domain, new JavaBeanAccessor(%s)).mapAll().apply();
+                return domain;
+              }
+
+              """.formatted(domainType, name, dtoType, dtoName, domainType, domainType, dtoName);
+    } else if (name.equals("copyDto") && params.size() == 2 && !returnsDomain) {
+      // copyDto(<D> source, <D> target)：Dto 同类型拷贝，BeanReader 直接覆盖同名属性
+      VariableElement srcParam = params.get(0);
+      VariableElement tgtParam = params.get(1);
+      String srcType = typeName(srcParam.asType());
+      String srcName = srcParam.getSimpleName().toString();
+      String tgtName = tgtParam.getSimpleName().toString();
+      return """
+              @Override
+              public void %s(%s %s, %s %s) {
+                BeanReader.read(%s, %s).mapAll().apply();
+              }
+
+              """.formatted(name, srcType, srcName, srcType, tgtName, srcName, tgtName);
+    } else if (params.size() == 1 && returnsDomain) {
+      // 读方向：toDto(Domain) / toChain(Domain)
+      return generateRead(method);
+    } else {
+      StringBuilder paramList = new StringBuilder();
+      for (int i = 0; i < params.size(); i++) {
+        if (i > 0) {
+          paramList.append(", ");
+        }
+        paramList.append(typeName(params.get(i).asType())).append(' ').append(params.get(i).getSimpleName());
+      }
+      String ret = returnsDomain ? typeName(method.getReturnType()) : "void";
+      return """
+              @Override
+              public %s %s(%s) {
+                throw new UnsupportedOperationException("@BeanMap 暂不支持的方法形态：" + %s);
+              }
+
+              """.formatted(ret, name, paramList, "\"" + name + "\"");
+    }
+  }
+
+  private String generateRead(ExecutableElement method) {
+    String name = method.getSimpleName().toString();
+    VariableElement domainParam = method.getParameters().get(0);
+    String domainType = typeName(domainParam.asType());
+    String domainName = domainParam.getSimpleName().toString();
+    String retType = typeName(method.getReturnType());
+
+    StringBuilder chain = new StringBuilder();
+    BeanMapField[] annos = readBeanMapFields(method);
+    for (BeanMapField mf : annos) {
+      if (mf.ignore()) {
+        String target = mf.target().isEmpty() ? mf.source() : mf.target();
+        chain.append("      .ignore(\"").append(target).append("\")\n");
+        continue;
+      }
+      String source = mf.source();
+      String target = mf.target().isEmpty() ? mf.source() : mf.target();
+      String getter = resolveGetter(domainType, source);
+      String setter = retType + "::set" + cap(target);
+      if (mf.converter() != void.class) {
+        chain.append("      .map(\"").append(target).append("\", ")
+                .append(getter).append(", ").append(setter)
+                .append(", new ").append(mf.converter().getName()).append("())\n");
+      } else {
+        chain.append("      .map(\"").append(target).append("\", ")
+                .append(getter).append(", ").append(setter).append(")\n");
+      }
+    }
+    chain.append("      .mapAll()\n");
+
+    return """
+            @Override
+            public %s %s(%s %s) {
+              return BeanReader.read(%s, new %s())
+            %s
+                  .apply();
+            }
+
+            """.formatted(retType, name, domainType, domainName, domainName, retType, chain.toString());
+  }
+
+  private BeanMapField[] readBeanMapFields(ExecutableElement method) {
+    BeanMapFields container = method.getAnnotation(BeanMapFields.class);
+    if (container != null) {
+      return container.value();
+    }
+    BeanMapField single = method.getAnnotation(BeanMapField.class);
+    return single == null ? new BeanMapField[0] : new BeanMapField[]{single};
+  }
+
+  private String cap(String name) {
+    if (name.isEmpty()) {
+      return name;
+    }
+    return Character.toUpperCase(name.charAt(0)) + name.substring(1);
+  }
+
+  /**
+   * 解析读方向显式映射的源 getter 方法引用：boolean 字段（含 {@code isXxx} 命名）用 {@code is} 前缀，其余用 {@code get} 前缀。
+   *
+   * <p>
+   * 领域实体常把 boolean 字段命名为 {@code isXxx}（如 {@code isMobileNumberValidated}），其 getter 是 {@code isMobileNumberValidated()}，
+   * 而非 {@code getMobileNumberValidated()} —— 属性名仍是 {@code mobileNumberValidated}。 若不按字段类型选前缀，生成的 {@code get} 引用会编译失败。
+   */
+  private String resolveGetter(String domainType, String source) {
+    TypeElement te = processingEnv.getElementUtils().getTypeElement(domainType);
+    if (te != null) {
+      String isName = "is" + cap(source);
+      for (Element e : te.getEnclosedElements()) {
+        if (e instanceof VariableElement f) {
+          String fname = f.getSimpleName().toString();
+          if (fname.equals(source) || fname.equals(isName)) {
+            TypeMirror t = f.asType();
+            boolean bool = t.getKind() == TypeKind.BOOLEAN
+                    || "java.lang.Boolean".equals(t.toString());
+            if (bool) {
+              return domainType + "::is" + cap(source);
+            }
+          }
+        }
+      }
+    }
+    return domainType + "::get" + cap(source);
+  }
+
+  private String typeName(TypeMirror type) {
+    return type.toString();
+  }
+}

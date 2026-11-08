@@ -1,0 +1,112 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+  <modelVersion>4.0.0</modelVersion>
+
+  <parent>
+    <artifactId>parent</artifactId>
+    <groupId>cn.labzen</groupId>
+    <version>21.3</version>
+    <relativePath/>
+  </parent>
+
+  <artifactId>bean-map</artifactId>
+  <packaging>jar</packaging>
+  <version>1.0.0</version>
+  <name>Labzen.BeanMap</name>
+  <description>通用对象映射基础库：两态全量拷贝 + 三态部分更新 + 覆盖度断言 + 字段封禁，作为 MapStruct 的功能替代。</description>
+  <url>https://github.com/labzen/bean-map</url>
+
+  <licenses>
+    <license>
+      <name>The Apache License, Version 2.0</name>
+      <url>https://www.apache.org/licenses/LICENSE-2.0.txt</url>
+    </license>
+  </licenses>
+
+  <organization>
+    <name>Labzen</name>
+    <url>https://labzen.cn</url>
+  </organization>
+
+  <developers>
+    <developer>
+      <name>Dean Zhao</name>
+      <email>rcarlosdasilva@163.com</email>
+      <timezone>+8</timezone>
+    </developer>
+  </developers>
+
+  <scm>
+    <url>https://github.com/labzen/bean-map</url>
+    <connection>scm:git@github.com:labzen/bean-map.git</connection>
+    <developerConnection>scm:git@github.com:labzen/bean-map.git</developerConnection>
+    <tag>V${project.version}</tag>
+  </scm>
+
+  <properties>
+    <labzen.spring.version>1.2.3</labzen.spring.version>
+    <labzen.tool.version>1.4.1</labzen.tool.version>
+    <labzen.logger.version>1.6.1</labzen.logger.version>
+  </properties>
+
+  <dependencyManagement>
+    <dependencies>
+      <dependency>
+        <groupId>cn.labzen</groupId>
+        <artifactId>spring</artifactId>
+        <version>${labzen.spring.version}</version>
+      </dependency>
+      <dependency>
+        <groupId>cn.labzen</groupId>
+        <artifactId>tool</artifactId>
+        <version>${labzen.tool.version}</version>
+      </dependency>
+      <dependency>
+        <groupId>cn.labzen</groupId>
+        <artifactId>logger</artifactId>
+        <version>${labzen.logger.version}</version>
+      </dependency>
+    </dependencies>
+  </dependencyManagement>
+
+  <dependencies>
+    <dependency>
+      <groupId>cn.labzen</groupId>
+      <artifactId>spring</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>cn.labzen</groupId>
+      <artifactId>tool</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>cn.labzen</groupId>
+      <artifactId>logger</artifactId>
+    </dependency>
+  </dependencies>
+
+  <build>
+    <plugins>
+      <!-- 本模块自带 APT 处理器；编译自身时处理器类尚未生成，需关闭注解处理，
+           下游依赖本 jar 时服务注册仍会正常触发代码生成 -->
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-compiler-plugin</artifactId>
+        <configuration>
+          <proc>none</proc>
+        </configuration>
+      </plugin>
+
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-gpg-plugin</artifactId>
+        <inherited>false</inherited>
+      </plugin>
+      <plugin>
+        <groupId>org.sonatype.central</groupId>
+        <artifactId>central-publishing-maven-plugin</artifactId>
+      </plugin>
+    </plugins>
+  </build>
+</project>

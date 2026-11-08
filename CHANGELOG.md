@@ -1,0 +1,72 @@
+# Changelog
+
+`cn.labzen:bean-map` 的版本记录，遵循语义化版本。当前公开 API 与能力边界见 `README.md`，各版本之间的升级注意事项见文末「升级说明」。
+
+## [1.1.1] - 2026-11-08
+
+缺陷修复与测试补齐，公开 API 无变更。
+
+### 修复
+
+- 字段声明 `required` 且命中 `ignore*` 跳过规则时仍执行必填判定，避免绕过 `REQUIRED` 中断。
+- 读方向 `BeanReader.mapAll()` 跳过目标字段上的 `@BeanUnmapped`，与写方向语义一致。
+- APT 生成跳过 `static` / `default` 方法；按方法真实签名生成参数列表；`updateDomain` 保持声明参数顺序，`copyDto` 使用第二参数真实类型，`toDomain` 要求单参且有返回值。
+- APT 生成读取 `@BeanMapField#converter` 类型时处理 `MirroredTypeException`；处理器生成失败以编译期 `ERROR` 诊断报告。
+
+### 测试与构建
+
+- 新增 7 个 JUnit 5 测试类、44 个用例，覆盖三态与修饰符管线、`SourceAccessor`（含 record / Map / 形状 fail-fast）、集合元素级映射、多源合并三种冲突策略、编程式配置、覆盖度断言与 APT 生成。
+- `maven-surefire-plugin` 显式设置 `testFailureIgnore=false`，测试失败即中止构建。
+
+### 文档
+
+- `README.md` 按源码行为复核显式 null 的转换路径、数组元素映射返回 `List`、白名单校验时机、APT 识别方式、读方向 `mapAll()` 边界与测试套件说明。
+- 设计草案同步阶段 10 完成状态、落地清单与阶段 12 评估结论。
+
+## [1.1.0] - 2026-11-08
+
+功能版本，对应路线图阶段 3–9 与阶段 11。
+
+### 新增
+
+- `AbortCode` 语义码与 `BeanMapAbortException#getAbortCode()`；`AbortHandler` 链级中断扩展点。
+- `BeanMapper.withConversionService(...)` 链级类型转换器注入，默认使用 Spring `DefaultConversionService` 共享实例。
+- APT 生成类注册方式由 `-Abeanmap.registry=spring|spi` 控制，缺省为 `spring`。
+- 集合元素级映射 `element(...)` / `ignoreNullElement()` 与 `InstantiationStrategy` 实例化策略。
+- 多源合并 `BeanComposer` 与 `ConflictPolicy` 的 `lastWins()` / `firstWins()` / `throwOnConflict()`。
+- 编程式配置 `BeanMapConfiguration`（`withConfiguration(...)`），不读取配置文件、不做 `ServiceLoader` 自动加载。
+- record 组件 accessor、`MapAccessor` 三态 Map 源与 `JavaBeanAccessor` 的源形状 fail-fast。
+- `README.md` 完整说明坐标、公开 API、注解、APT 生成、覆盖度断言与边界约束。
+
+### 不兼容变更
+
+- `BeanMapAbortException` 的构造器接收 `AbortCode`；`getCode()` 仍提供等价整型状态码。`AbortHandler` 的实现按 `AbortCode` 接收语义码。
+- APT 生成类在默认模式下带 `@Component`，消费方需提供 `spring-context`；非 Spring 消费方使用 `-Abeanmap.registry=spi`。
+
+## [1.0.0] - 2026-11-07
+
+首个发布版本。坐标 `cn.labzen:bean-map:1.0.0`，JDK 21，强依赖 Spring（`spring-core`）。
+
+- 从 paragon 抽离 17 个类与 3 个注解，独立 Maven 坐标、独立 git 仓库与 Central 发布链。
+- 两态全量读写与三态部分更新、方法引用字段声明、字段修饰符管线、覆盖度断言、入口级字段封禁。
+- `SourceAccessor` 抽象与 `JavaBeanAccessor` 默认实现；`BeanMapProcessor` 生成 `*BeanMapImpl`。
+
+---
+
+## 升级说明
+
+### 1.0.0 → 1.1.0
+
+- 把依赖坐标中的版本改为 `1.1.0`（或由依赖管理统一锁定）。
+- `BeanMapAbortException` 的构造器接收 `AbortCode` 枚举值；直接按整型码构造该异常的代码改用 `AbortCode`。自定义 `AbortHandler` 的实现按 `AbortCode` 接收语义码，需要整型码时用 `getCode()`。
+- 非 Spring 消费方在 `maven-compiler-plugin` 的 `compilerArgs` 中配置 `-Abeanmap.registry=spi`，生成不带注册注解的普通 `public` 类。
+- `1.1.0` 起 APT 生成类默认带 `@Component`，Spring 消费方需提供 `spring-context` 并启用组件扫描。
+
+### 1.1.0 → 1.1.1
+
+二进制兼容，直接替换版本号即可。以下为缺陷修复带来的行为变化，若业务此前依赖旧行为需确认：
+
+- 字段同时声明 `required` 与 `ignore*` 时，命中跳过规则会以 `REQUIRED`（400）中断。
+- 读方向 `mapAll()` 不再尝试写入标了 `@BeanUnmapped` 的目标字段；这类字段需显式 `map(...)` 或保持不写。
+- APT 不再为 `static` / `default` 方法生成 `@Override` stub，生成方法的参数列表与接口声明完全一致。
+- 构建侧 `testFailureIgnore=false` 只影响本库自身的构建；作为依赖引入不受影响。

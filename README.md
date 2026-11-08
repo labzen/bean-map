@@ -17,7 +17,7 @@ Maven（JDK 21+）：
 <dependency>
   <groupId>cn.labzen</groupId>
   <artifactId>bean-map</artifactId>
-  <version>1.1.0</version>
+  <version>1.1.1</version>
 </dependency>
 ```
 
@@ -163,7 +163,7 @@ UserDto dto = BeanReader.read(user, new UserDto())
 | 值处理 | `trim`、`withConverter`、`withDefault` |
 | 约束 | `required`、`notClearable`、`nullable` |
 
-处理管线：缺省分流 → `ignore*` → `withDefault` / `notClearable` → `trim` → 转换 → `required` → 写入。`withDefault` 与 `notClearable` 互斥；按值判定的修饰符作用于转换前的 DTO 侧原值，`required(...)` 的谓词作用于转换后的值。显式 `null` 不经过 `withConverter` 与 `element(...)`，按 `nullable()` / `notClearable()` 的规则落为 null。
+处理管线：缺省分流 → `ignore*` → `withDefault` / `notClearable` → `trim` → 转换 → `required` → 写入。`withDefault` 与 `notClearable` 互斥；按值判定的修饰符作用于转换前的 DTO 侧原值，`required(...)` 的谓词作用于转换后的值。显式 `null` 不经过 `withConverter` 与 `element(...)`，按 `nullable()` / `notClearable()` 的规则落为 null。字段声明了 `required` 且命中 `ignore*` 时跳过写入并以 `REQUIRED`（400）中断。
 
 DTO 注解可作为修饰符的默认值，生效优先级为：**链上显式调用 > 字段注解 > 类注解 > 默认关闭**。
 
@@ -288,11 +288,11 @@ public interface UserBeanMap {
 | 方法形态 | 识别方式 | 生成逻辑 |
 |---|---|---|
 | `toDomain(Dto)` | `toDomain` 前缀 + 单参 + 有返回值 | `new` 出 domain 后 `BeanMapper.of(...).mapAll().apply()` |
-| `updateDomain(Dto, @BeanTarget Domain)` | 参数带 `@BeanTarget` 且返回 `void` | 对传入 domain 就地 `mapAll()` |
-| `copyDto(Src, Tgt)` | 方法名 `copyDto` + 双参 + `void` | `BeanReader.read(...).mapAll().apply()` |
-| `toDto(Domain)` / `toChain(Domain)` | 单参 + 有返回值 | `BeanReader.read(...)`，按 `@BeanMapField` 声明显式映射后 `mapAll()` |
+| `updateDomain(..., @BeanTarget Domain)` | 双参、返回 `void`、其中一个参数带 `@BeanTarget` | 对传入 domain 就地 `mapAll()`；参数顺序按接口声明保持 |
+| `copyDto(Src, Tgt)` | 方法名 `copyDto` + 双参 + `void` | `BeanReader.read(src, tgt).mapAll().apply()`，第二参数类型按接口声明 |
+| 读方向（单参 + 有返回值） | 兜底分支：不匹配 `toDomain` 的单参有返回值方法，不区分 `toDto` / `toChain` | `BeanReader.read(...)`，按 `@BeanMapField` 声明显式映射后 `mapAll()` |
 
-处理器不读取 domain / DTO 的字段，只解析映射接口的方法签名，因此不依赖 Lombok 的字段生成顺序。未识别的方法形态生成抛 `UnsupportedOperationException` 的方法体。
+`static` / `default` 方法不参与生成。处理器不读取 domain / DTO 的字段，只解析映射接口的方法签名，因此不依赖 Lombok 的字段生成顺序。未识别的方法形态生成抛 `UnsupportedOperationException` 的方法体；处理器内部生成失败以编译期 `ERROR` 诊断报告。
 
 处理器经 `META-INF/services/javax.annotation.processing.Processor` 注册。本库构建时通过 `<proc>none</proc>` 关闭注解处理（处理器类自身尚未生成），下游以 jar 依赖本库时正常触发代码生成。
 
@@ -391,8 +391,8 @@ BeanComposer.compose(view)
 - 子对象块的源值必须实现 `SourceAccessor`，否则声明期抛 `BeanMapException`。
 - 读方向 `mapAll()` 会跳过两侧类型不一致、源对象没有 public `getXxx` / `isXxx` 的属性（含 record 裸 accessor）、以及目标字段上的 `@BeanUnmapped`；被跳过的字段需显式 `map(...)` 或保持不写。
 - 配置文件驱动（如 `labzen.yml`）与 `ServiceLoader` 式自动加载不在当前能力范围内；默认策略由 `BeanMapConfiguration` 按入口显式传入。
-- 库内未附带测试用例，使用方需自行编写覆盖度断言测试。
+- 库内自带 JUnit 5 测试套件，`mvn test` 执行且测试失败即中止构建；覆盖度断言 `BeanMapCoverage.verify(...)` 由使用方的测试显式调用。
 
 ## 版本与发布
 
-`cn.labzen:bean-map:1.1.0` 已发布至 Maven Central，对应本仓库当前源码能力；`1.0.0` 为首个发布版本。Central 版本不可覆盖，后续发布需提升版本号。parent 为 `cn.labzen:parent:21.3`（统一 import `labzen-bom:2.3`），JDK 21，Apache License 2.0。源码仓库：`git@github.com:labzen/bean-map.git`。
+`cn.labzen:bean-map:1.1.1` 已发布至 Maven Central，对应本仓库当前源码能力；`1.0.0` 为首个发布版本。Central 版本不可覆盖，后续发布需提升版本号。parent 为 `cn.labzen:parent:21.3`（统一 import `labzen-bom:2.3`），JDK 21，Apache License 2.0。源码仓库：`git@github.com:labzen/bean-map.git`。版本记录与各版本升级注意事项见 `CHANGELOG.md`。

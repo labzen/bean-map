@@ -11,6 +11,7 @@ import javax.annotation.processing.AbstractProcessor;
 import javax.annotation.processing.Filer;
 import javax.annotation.processing.RoundEnvironment;
 import javax.annotation.processing.SupportedAnnotationTypes;
+import javax.annotation.processing.SupportedOptions;
 import javax.annotation.processing.SupportedSourceVersion;
 import javax.lang.model.SourceVersion;
 import javax.lang.model.element.Element;
@@ -39,11 +40,23 @@ import javax.tools.JavaFileObject;
  * 生成代码统一委托给编程式 {@link BeanMapper} / {@link BeanReader}（字段管线、三态门控、 {@code @BeanUnmapped}/{@code @BeanClearable}
  * 注解规则均由其承载），因此本处理器<b>不读取 domain/DTO 的字段</b>， 只解析映射接口的方法签名与 {@link BeanMapField} 声明，无需与 Lombok 抢占字段生成顺序。
  *
+ * <p>
+ * 生成类的注册方式由编译器选项 {@code -Abeanmap.registry} 决定：{@code spring}（默认）生成带 {@code @Component} 的实现；
+ * {@code spi} 生成不带注册注解的普通类，由使用方按自己的容器注册。库不提供全局注册表，也不做 {@code ServiceLoader} 自动加载。
+ *
  * @since 2026-11-07
  */
-@SupportedAnnotationTypes("cn.labzen.beanmap.BeanMap")
+@SupportedAnnotationTypes(BeanMapProcessor.BEAN_MAP_PKG + ".BeanMap")
 @SupportedSourceVersion(SourceVersion.RELEASE_21)
+@SupportedOptions("beanmap.registry")
 public class BeanMapProcessor extends AbstractProcessor {
+
+  static final String BEAN_MAP_PKG = "cn.labzen.beanmap";
+
+  private static final String OPTION_REGISTRY = "beanmap.registry";
+  private static final String REGISTRY_SPRING = "spring";
+  private static final String REGISTRY_SPI = "spi";
+  private static final String SPRING_COMPONENT = "org.springframework.stereotype.Component";
 
   @Override
   public boolean process(Set<? extends TypeElement> annotations, RoundEnvironment roundEnv) {
@@ -69,19 +82,21 @@ public class BeanMapProcessor extends AbstractProcessor {
       }
     }
 
+    boolean spring = REGISTRY_SPRING.equals(registry());
+    String componentImport = spring ? "import " + SPRING_COMPONENT + ";\n" : "";
+    String componentAnnotation = spring ? "@Component\n" : "";
     String src = """
             package %s;
 
-            import cn.labzen.beanmap.BeanMapper;
-            import cn.labzen.beanmap.BeanReader;
-            import cn.labzen.beanmap.JavaBeanAccessor;
-            import org.springframework.stereotype.Component;
-
-            @Component
-            public class %s implements %s {
+            import %s.BeanMapper;
+            import %s.BeanReader;
+            import %s.JavaBeanAccessor;
+            %s
+            %spublic class %s implements %s {
             %s
             }
-            """.formatted(pkg, implName, ifaceName, body.toString());
+            """.formatted(pkg, BEAN_MAP_PKG, BEAN_MAP_PKG, BEAN_MAP_PKG,
+            componentImport, componentAnnotation, implName, ifaceName, body.toString());
 
     try {
       Filer filer = processingEnv.getFiler();
@@ -93,6 +108,19 @@ public class BeanMapProcessor extends AbstractProcessor {
       processingEnv.getMessager().printMessage(
               Diagnostic.Kind.ERROR, "BeanMapProcessor 生成 " + implName + " 失败：" + e);
     }
+  }
+
+  private String registry() {
+    String value = processingEnv.getOptions().get(OPTION_REGISTRY);
+    if (value == null || value.isBlank() || REGISTRY_SPRING.equals(value)) {
+      return REGISTRY_SPRING;
+    }
+    if (REGISTRY_SPI.equals(value)) {
+      return REGISTRY_SPI;
+    }
+    processingEnv.getMessager().printMessage(Diagnostic.Kind.WARNING,
+            "未知的 -A" + OPTION_REGISTRY + " 取值：" + value + "，按 spring 处理");
+    return REGISTRY_SPRING;
   }
 
   private String generateMethod(ExecutableElement method) {

@@ -208,6 +208,28 @@ public interface UserBeanMap {
 
 处理器经 `META-INF/services/javax.annotation.processing.Processor` 注册。本库构建时通过 `<proc>none</proc>` 关闭注解处理（处理器类自身尚未生成），下游以 jar 依赖本库时正常触发代码生成。
 
+生成类的注册方式由编译器选项 `-Abeanmap.registry` 控制：
+
+| 取值 | 生成结果 | 适用场景 |
+|---|---|---|
+| `spring`（默认，含未传） | 生成类带 `@Component` | Spring 项目，由组件扫描注册 |
+| `spi` | 生成不带注册注解的普通 `public` 类 | 非 Spring 项目，由使用方按自己的容器注册 |
+
+`spi` 模式不提供全局注册表，也不做 `ServiceLoader` 自动加载；使用方自行实例化或注册生成的 `*Impl`。Maven 配置：
+
+```xml
+<plugin>
+  <artifactId>maven-compiler-plugin</artifactId>
+  <configuration>
+    <compilerArgs>
+      <arg>-Abeanmap.registry=spi</arg>
+    </compilerArgs>
+  </configuration>
+</plugin>
+```
+
+未知取值会告警并按 `spring` 处理；生成代码中的库包名与注解类型由处理器常量统一提供。
+
 ## 覆盖度断言
 
 `BeanMapCoverage.verify(PartialChain<?, ?>... writes)` 比对「请求 DTO 的字段」与「各入口链上声明的可写字段 ∪ `@BeanUnmapped` ∪ 各入口 `excludes(...)`」。每个 DTO 字段必须有归宿，否则断言失败；它同时校验请求 DTO 一律使用包装类型（primitive 无法表达显式 `null`）。

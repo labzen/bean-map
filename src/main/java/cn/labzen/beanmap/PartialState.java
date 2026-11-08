@@ -9,7 +9,7 @@ import org.springframework.core.convert.support.DefaultConversionService;
 import java.util.*;
 
 /**
- * 一次写入的作用域：参与写入的全部字段声明 + 写入级断言 + 类型转换器 + 中断处理扩展点 + 写入结果
+ * 一次写入的作用域：参与写入的全部字段声明 + 写入级断言 + 类型转换器 + 实例化策略 + 中断处理扩展点 + 写入结果
  */
 final class PartialState {
 
@@ -21,6 +21,7 @@ final class PartialState {
   private SourceAccessor rootDto;
   private ConversionService conversionService = DefaultConversionService.getSharedInstance();
   private AbortHandler abortHandler = AbortHandler.THROWING;
+  private InstantiationStrategy instantiation = InstantiationStrategy.DEFAULT;
   private boolean requireAnyProvided;
 
   void declare(BeanField<?, ?, ?> field) {
@@ -103,6 +104,20 @@ final class PartialState {
    */
   ConversionService conversionService() {
     return conversionService;
+  }
+
+  /**
+   * 指定本次写入的实例化策略
+   */
+  void instantiation(InstantiationStrategy instantiation) {
+    this.instantiation = Objects.requireNonNull(instantiation, "实例化策略不能为空");
+  }
+
+  /**
+   * 本次写入的实例化策略（默认走无参构造器）
+   */
+  InstantiationStrategy instantiation() {
+    return instantiation;
   }
 
   /**

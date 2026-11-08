@@ -8,10 +8,15 @@ import cn.labzen.beanmap.annotation.BeanUnmappedBlank;
 import org.springframework.core.convert.ConversionService;
 
 import java.io.Serializable;
+import java.lang.reflect.Array;
 import java.lang.reflect.Field;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
+import java.util.Set;
 import java.util.function.BiFunction;
 import java.util.function.BiPredicate;
 import java.util.function.Function;
@@ -53,6 +58,8 @@ public final class BeanField<P, R, T> extends PartialChain<P, R> {
   private String notClearableMessage;
   private boolean nullable;
   private Converter converter;
+  private Function<Object, Object> elementConverter;
+  private boolean ignoreNullElement;
   private boolean required;
   private RequiredRule requiredRule;
   private String requiredMessage;
@@ -507,7 +514,7 @@ public final class BeanField<P, R, T> extends PartialChain<P, R> {
       return;
     }
 
-    Object raw = provided ? DtoReflection.value(source, path) : null;
+    Object raw = provided ? source.getValue(path) : null;
     if (isIgnored(raw)) {
       return;
     }
@@ -573,7 +580,47 @@ public final class BeanField<P, R, T> extends PartialChain<P, R> {
     return requiredRule == null || requiredRule.satisfied(value, source);
   }
 
+  /**
+   * 逐元素转换集合 / 数组 / Map 的值：Iterable 逐元素转换（Set 保持容器语义）、Map 转换 value 并保留 key、数组按 List 语义返回。
+   */
+  public BeanField<P, R, T> element(Function<Object, Object> converter) {
+    this.elementConverter = Objects.requireNonNull(converter, "元素转换器不能为空");
+    return this;
+  }
+
+  /**
+   * 逐元素映射：优先走链上 {@code ConversionService}，无法转换时按实例化策略创建目标实例并做同名直读。
+   */
+  public BeanField<P, R, T> element(Class<?> sourceType, Class<?> targetType) {
+    Objects.requireNonNull(sourceType, "元素源类型不能为空");
+    Objects.requireNonNull(targetType, "元素目标类型不能为空");
+    return element(value -> {
+      if (!sourceType.isInstance(value)) {
+        throw new BeanMapException("元素类型不匹配：期望 {}，实际 {}",
+                sourceType.getSimpleName(), value.getClass().getSimpleName());
+      }
+      ConversionService conversion = state.conversionService();
+      if (conversion.canConvert(value.getClass(), targetType)) {
+        return conversion.convert(value, targetType);
+      }
+      Object target = state.instantiation().create(targetType);
+      BeanReader.read(value, target).mapAll().apply();
+      return target;
+    });
+  }
+
+  /**
+   * 跳过容器中的 null 元素；未声明时保留 null 元素。空容器原样返回。
+   */
+  public BeanField<P, R, T> ignoreNullElement() {
+    this.ignoreNullElement = true;
+    return this;
+  }
+
   private Object convert(Object value) {
+    if (elementConverter != null) {
+      return convertElements(value);
+    }
     if (converter != null) {
       return converter.convert(value, source);
     }
@@ -588,6 +635,49 @@ public final class BeanField<P, R, T> extends PartialChain<P, R> {
       return conversion.convert(value, target);
     }
     throw requestError(AbortCode.TYPE_MISMATCH, "值类型无法写入该字段：" + value.getClass().getSimpleName());
+  }
+
+  private Object convertElements(Object value) {
+    if (value == null) {
+      return null;
+    }
+    if (value instanceof Map<?, ?> map) {
+      Map<Object, Object> result = new LinkedHashMap<>();
+      for (Map.Entry<?, ?> entry : map.entrySet()) {
+        Object item = entry.getValue();
+        if (item == null) {
+          if (!ignoreNullElement) {
+            result.put(entry.getKey(), null);
+          }
+          continue;
+        }
+        result.put(entry.getKey(), elementConverter.apply(item));
+      }
+      return result;
+    }
+    if (value instanceof Iterable<?> iterable) {
+      List<Object> result = new ArrayList<>();
+      for (Object item : iterable) {
+        if (item == null && ignoreNullElement) {
+          continue;
+        }
+        result.add(item == null ? null : elementConverter.apply(item));
+      }
+      return value instanceof Set<?> ? new LinkedHashSet<>(result) : result;
+    }
+    if (value.getClass().isArray()) {
+      List<Object> result = new ArrayList<>();
+      int length = Array.getLength(value);
+      for (int i = 0; i < length; i++) {
+        Object item = Array.get(value, i);
+        if (item == null && ignoreNullElement) {
+          continue;
+        }
+        result.add(item == null ? null : elementConverter.apply(item));
+      }
+      return result;
+    }
+    throw new BeanMapException("element(...) 要求字段 {} 的值为 Collection / Map / 数组", path);
   }
 
   private RuntimeException requestError(AbortCode code, String detail) {

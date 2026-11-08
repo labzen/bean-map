@@ -94,6 +94,20 @@ public final class BeanMapper<P> extends PartialChain<P, P> {
   }
 
   /**
+   * 指定本次写入的实例化策略（链首声明，作用于元素级映射创建目标元素）。
+   *
+   * <p>
+   * 默认走无参构造器；record / 不可变类型等无默认构造器的元素目标，由实现方按类型返回实例。
+   *
+   * @param instantiation
+   *          实例化策略，不能为空
+   */
+  public BeanMapper<P> withInstantiationStrategy(InstantiationStrategy instantiation) {
+    state.instantiation(instantiation);
+    return this;
+  }
+
+  /**
    * 按声明顺序执行全部字段，返回本次写入的结果（{@link BeanMapResource}）； 客户端的值不满足 {@code required} / {@code
    * notClearable} 时默认抛 {@code BeanMapAbortException}（4xx），中断异常可由 {@link AbortHandler} 按入口替换
    */

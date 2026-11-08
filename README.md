@@ -147,6 +147,8 @@ UserDto dto = BeanReader.read(user, new UserDto())
 | `requireAnyProvided()` | 写入级断言，无任何输入时以 `304` 中断 |
 | `withConversionService(cs)` | 链首声明，指定本次写入使用的 `ConversionService`；默认 Spring 共享实例 |
 | `withAbortHandler(handler)` | 链首声明，指定本次写入的中断处理扩展点；默认抛 `BeanMapAbortException` |
+| `withInstantiationStrategy(s)` | 链首声明，指定元素级映射的实例化策略 |
+| `element(...)` / `ignoreNullElement()` | 字段级声明，逐元素转换容器值并控制 null 元素 |
 | `apply()` | 按声明顺序执行，返回 `BeanMapResource<R>` |
 
 字段修饰符：
@@ -179,6 +181,31 @@ BeanMapper.of(user, source)
 ```
 
 `withConversionService(...)` 只作用于本次映射，不同入口可使用不同的转换规则。扩展规则走 Spring 原生的 `Converter` 注册机制，库不引入自有 SPI 接口，也不增加依赖。
+
+## 集合元素级映射
+
+`element(...)` 让集合 / 数组 / Map 按元素转换，而不是把整个容器交给字段级 converter：
+
+```java
+BeanMapper.of(domain, source)
+        .map(dto::getNames, Domain::setNames).element(v -> "[" + v + "]").ignoreNullElement()
+        .apply();
+```
+
+| 声明 | 作用 |
+|---|---|
+| `element(Function<Object, Object>)` | 逐元素转换；Iterable / Set 保持容器语义，Map 转换 value 并保留 key，数组按 List 语义返回 |
+| `element(Class<S>, Class<T>)` | 逐元素映射：优先走链上 `ConversionService`，无法转换时按 `InstantiationStrategy` 创建目标实例并做同名直读 |
+| `ignoreNullElement()` | 跳过容器中的 null 元素；未声明时保留 |
+| `withInstantiationStrategy(...)` | 链首注入实例化策略，默认反射调用无参构造器 |
+
+两侧元素类型不同时，`map(getter, setter)` 的类型约束要求两侧一致，需改用字符串属性名重载：
+
+```java
+.map("items", Domain::setItems).element(Src.class, Dst.class)
+```
+
+`InstantiationStrategy` 的默认实现走无参构造器，record / 不可变目标由调用方按入口注入自定义实现。库不提供元素映射器注册表，转换规则由链上声明或 `ConversionService` 决定。
 
 ## 写入结果
 
@@ -294,7 +321,7 @@ BeanMapper.of(user, source)
 - `sub` 不做环检测，自引用嵌套会栈溢出。
 - 子对象块的源值必须实现 `SourceAccessor`，否则声明期抛 `BeanMapException`。
 - 读方向 `mapAll()` 会跳过两侧类型不一致的属性，这类字段需显式 `map(...)`。
-- 集合元素级映射、多源合并、`ServiceLoader` 式自动加载、`labzen.yml` 配置均不在当前能力范围内。
+- 多源合并、`ServiceLoader` 式自动加载、`labzen.yml` 配置均不在当前能力范围内。
 - 1.0.0 未附带测试用例，使用方需自行编写覆盖度断言测试。
 
 ## 版本与发布

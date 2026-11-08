@@ -17,11 +17,24 @@ Maven（JDK 21+）：
 <dependency>
   <groupId>cn.labzen</groupId>
   <artifactId>bean-map</artifactId>
-  <version>1.2.0</version>
+  <version>1.3.0</version>
 </dependency>
 ```
 
 POM 直接依赖 `cn.labzen:spring`、`cn.labzen:tool`、`cn.labzen:logger`，源码实际使用 `spring-core` 的 `ConversionService` 做隐式类型转换。APT 生成类的注册方式由 `-Abeanmap.registry` 决定：默认 `spring` 模式生成带 `@Component` 的类（消费方需提供 `spring-context`），`spi` 模式生成不带注册注解的普通 `public` 类。
+
+## 包结构
+
+公开 API 按职责分布在六个子包，根包 `cn.labzen.beanmap` 仅保留包说明：
+
+| 包 | 职责 | 主要类型 |
+|---|---|---|
+| `cn.labzen.beanmap.core` | 三态写入链、读方向装配、多源合并、写入结果与覆盖度断言 | `BeanMapper`、`BeanReader`、`BeanComposer`、`BeanMapResource`、`BeanMapCoverage`、`BeanMapConfiguration`、`PartialChain`、`BeanField` |
+| `cn.labzen.beanmap.accessor` | 源对象访问抽象、JavaBean / Map 源与属性反射 | `SourceAccessor`、`JavaBeanAccessor`、`MapAccessor`、`DtoReflection` |
+| `cn.labzen.beanmap.spi` | 可替换策略 | `AbortCode`、`AbortHandler`、`InstantiationStrategy`、`ConflictPolicy` |
+| `cn.labzen.beanmap.exception` | 异常类型 | `BeanMapException`、`BeanMapAbortException` |
+| `cn.labzen.beanmap.annotation` | 映射接口与 DTO 字段注解 | `@BeanMap`、`@BeanOp`、`MappingType`、`@BeanMapField`、`@BeanTarget`、`@BeanUnmapped`、`@BeanClearable`、`@BeanUnmappedBlank` |
+| `cn.labzen.beanmap.processor` | 编译期注解处理器 | `BeanMapProcessor` |
 
 ## 三态语义
 
@@ -36,7 +49,7 @@ POM 直接依赖 `cn.labzen:spring`、`cn.labzen:tool`、`cn.labzen:logger`，�
 判据只有一条：该字段在本次负载里有没有出现，由 `SourceAccessor#isProvided(String)` 提供。
 
 ```java
-package cn.labzen.beanmap;
+package cn.labzen.beanmap.accessor;
 
 public interface SourceAccessor {
   boolean isProvided(String path);  // 是否出现
@@ -216,7 +229,7 @@ BeanMapper.of(domain, source)
 `BeanComposer` 把多个源产出的同名属性聚合进一个目标对象。每个 `from(...)` 源先产出局部结果，`apply()` 汇总后按冲突策略裁决同名字段，再统一写入；目标上没有被任何源产出的属性保持原值。
 
 ```java
-import static cn.labzen.beanmap.ConflictPolicy.lastWins;
+import static cn.labzen.beanmap.spi.ConflictPolicy.lastWins;
 
 UserView view = BeanComposer.compose(new UserView())
         .from(new JavaBeanAccessor(user))
@@ -314,7 +327,7 @@ public interface UserBeanMap {
 
 `static` / `default` 方法不参与生成。处理器不读取 domain / DTO 的字段，只解析映射接口的方法签名，因此不依赖 Lombok 的字段生成顺序；处理器内部生成失败以编译期 `ERROR` 诊断报告。
 
-处理器经 `META-INF/services/javax.annotation.processing.Processor` 注册。本库构建时通过 `<proc>none</proc>` 关闭注解处理（处理器类自身尚未生成），下游以 jar 依赖本库时正常触发代码生成。
+处理器经 `META-INF/services/javax.annotation.processing.Processor` 注册，注册类为 `cn.labzen.beanmap.processor.BeanMapProcessor`。本库构建时通过 `<proc>none</proc>` 关闭注解处理（处理器类自身尚未生成），下游以 jar 依赖本库时正常触发代码生成。
 
 生成类的注册方式由编译器选项 `-Abeanmap.registry` 控制：
 
@@ -336,7 +349,7 @@ public interface UserBeanMap {
 </plugin>
 ```
 
-未知取值会告警并按 `spring` 处理；生成代码中的库包名与注解类型由处理器常量统一提供。
+未知取值会告警并按 `spring` 处理；生成代码的 import 由处理器包常量输出，分别指向 `cn.labzen.beanmap.core.BeanMapper`、`cn.labzen.beanmap.core.BeanReader` 与 `cn.labzen.beanmap.accessor.JavaBeanAccessor`。
 
 ## 覆盖度断言
 
@@ -428,4 +441,4 @@ BeanComposer.compose(view)
 
 ## 版本与发布
 
-`cn.labzen:bean-map:1.2.0` 已发布至 Maven Central，对应本仓库当前源码能力；`1.0.0` 为首个发布版本。`1.2.0` 引入 `@BeanOp` / `MappingType` 显式形态分派，用法见「APT 生成」。Central 版本不可覆盖，后续发布需提升版本号。parent 为 `cn.labzen:parent:21.3`（统一 import `labzen-bom:2.3`），JDK 21，Apache License 2.0。源码仓库：`git@github.com:labzen/bean-map.git`。版本记录、版本策略与各版本升级注意事项见 `CHANGELOG.md`。
+`cn.labzen:bean-map:1.2.0` 已发布至 Maven Central，`1.0.0` 为首个发布版本。当前源码版本 `1.3.0`（待发布）按功能重组包结构，公开类型的全限定名见「包结构」；从 `1.2.0` 升级时按 `CHANGELOG.md` 的「升级说明」调整 import。`1.2.0` 引入 `@BeanOp` / `MappingType` 显式形态分派，用法见「APT 生成」。Central 版本不可覆盖，发布需提升版本号。parent 为 `cn.labzen:parent:21.3`（统一 import `labzen-bom:2.3`），JDK 21，Apache License 2.0。源码仓库：`git@github.com:labzen/bean-map.git`。版本记录、版本策略与各版本升级注意事项见 `CHANGELOG.md`。

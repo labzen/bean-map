@@ -2,76 +2,58 @@
  * Copyright (c) 2021-2026 Labzen. All rights reserved.
  */
 /**
- * 三态写入（部分更新）工具：把「本次负载里出现过的字段」写进一个 domain 实例，缺省字段一律不动。
+ * 通用对象映射基础库：三态部分更新、两态全量读写、多源合并与覆盖度断言，面向管理后台等中低吞吐场景。
  *
- * <h3>它解决什么</h3>
- * <p>
- * 更新请求需要区分负载里的三种写法，三者语义不同：
+ * <h3>包结构</h3>
  *
  * <ul>
- * <li>字段<b>缺省</b>（{@code {}}）⇒ 本次不涉及该字段，保持库中原值；
- * <li>字段<b>显式 null</b>（{@code {"x": null}}）⇒ 明确要求写入 {@code NULL}；
- * <li>字段<b>有值</b>（含空串、纯空白串）⇒ 照原值写入。
+ * <li>{@code cn.labzen.beanmap.core}：以 {@link cn.labzen.beanmap.core.BeanMapper} 为入口的三态写入链、读方向装配
+ * {@link cn.labzen.beanmap.core.BeanReader}、多源合并 {@link cn.labzen.beanmap.core.BeanComposer}、
+ * 写入结果 {@link cn.labzen.beanmap.core.BeanMapResource} 与覆盖度断言 {@link cn.labzen.beanmap.core.BeanMapCoverage}；
+ * <li>{@code cn.labzen.beanmap.accessor}：以 {@link cn.labzen.beanmap.accessor.SourceAccessor} 为核心的源对象访问抽象，
+ * 提供 JavaBean / Map 源实现与 DTO 属性反射；
+ * <li>{@code cn.labzen.beanmap.annotation}：映射接口注解（{@link cn.labzen.beanmap.annotation.BeanMap}、
+ * {@link cn.labzen.beanmap.annotation.BeanOp}、{@link cn.labzen.beanmap.annotation.BeanMapField}、
+ * {@link cn.labzen.beanmap.annotation.BeanTarget} 等）与 DTO 字段注解
+ * （{@link cn.labzen.beanmap.annotation.BeanUnmapped}、{@link cn.labzen.beanmap.annotation.BeanClearable}、
+ * {@link cn.labzen.beanmap.annotation.BeanUnmappedBlank}）；
+ * <li>{@code cn.labzen.beanmap.spi}：中断处理、实例化、冲突裁决等可替换策略；
+ * <li>{@code cn.labzen.beanmap.exception}：映射异常与策略中断异常；
+ * <li>{@code cn.labzen.beanmap.processor}：编译期生成映射接口实现的
+ * {@link cn.labzen.beanmap.processor.BeanMapProcessor}。
  * </ul>
+ *
+ * <h3>三态写入语义</h3>
  * <p>
- * 判据只有一条：负载里是否出现过该字段 —— 由 {@link cn.labzen.beanmap.SourceAccessor#isProvided(String)}
- * 提供（属性名的存在性由源对象实现决定；默认 {@link cn.labzen.beanmap.JavaBeanAccessor} 退化为两态）。
+ * 更新请求区分三种写法：字段<b>缺省</b>（本次不涉及该字段，保持库中原值）、字段<b>显式 null</b>（明确要求写入
+ * {@code NULL}）、字段<b>有值</b>（含空串、纯空白串，照原值写入）。判据只有一条：负载里是否出现过该字段，
+ * 由 {@link cn.labzen.beanmap.accessor.SourceAccessor#isProvided(String)} 提供；默认
+ * {@link cn.labzen.beanmap.accessor.JavaBeanAccessor} 恒返回 {@code true}，语义退化为两态。
  *
  * <p>
- * "出现了吗"的查询也在链上（业务域不必自己写字符串属性名）：{@link PartialChain#anyProvided()} 问"本次写入有没有任何输入" （"一个可改字段都没传 ⇒
- * 304"的判据）。值级约束同样在链上声明：{@code required}（必填）、{@code notClearable} （可选但不可清空）；{@code nullable()}（允许被显式 null 清空）；写入级约束用
- * {@link BeanMapper#requireAnyProvided()} （一个可改字段都没传 ⇒ 以 304 中断）。 一次写入的结果是 {@link BeanMapResource}（{@code apply()}
- * 的返回值）：{@link BeanMapResource#written(BeanGetter)} 给出"该 domain
- * 属性本次要落库的值"，{@link BeanMapResource#willWrite(BeanGetter)} /
- * {@link BeanMapResource#ifWillWrite(BeanGetter, java.util.function.Consumer)} 供落库侧决定"这一列动不动" （含"写成 NULL"）。
+ * 链上可声明值级约束（{@code required}、{@code notClearable}、{@code nullable}、{@code ignoreBlank}），
+ * 入口级约束用 {@link cn.labzen.beanmap.core.BeanMapper#requireAnyProvided()}；字段默认规则由 DTO 注解声明，
+ * 生效优先级为<b>链上显式调用 &gt; 字段注解 &gt; 类注解 &gt; 默认关闭</b>。一次写入的结果是
+ * {@link cn.labzen.beanmap.core.BeanMapResource}，给出本次要落库的值以及「这一列动不动」。
  *
  * <p>
- * 声明字段除逐个 {@code map(...)}（可挂修饰符）外，还可<b>同名直写</b>：{@link BeanMapper#map(BeanGetter[])} 按白名单、 {@link BeanMapper#mapAll()}
- * 按"DTO 的非 {@code @BeanUnmapped} 字段"整份配对（要求两侧属性同名、类型一致， 声明期校验）—— 需要修饰符的字段仍用 {@code map(...)} 显式声明，显式声明<b>覆盖</b>同名直写。
+ * 字段声明支持逐个 {@code map(...)}（可挂修饰符）与同名直写
+ * {@link cn.labzen.beanmap.core.BeanMapper#mapAll()}；两侧类型不同的字段用
+ * {@code map(getter, setter, converter)} 当场给出转换器；子对象块用 {@code sub(...)} 声明。
  *
- * <p>
- * 字段修饰符的<b>默认规则</b>可由 DTO 注解声明：{@code @BeanClearable}（允许被显式 null 清空， {@code nullable()}
- * 的默认）、{@code @BeanUnmappedBlank}（String 字段空白视为没传，{@code ignoreBlank()} 的默认），二者都可标在 DTO
- * 类（全局默认）或字段（覆盖类级，{@code value = false} 表示豁免）上。 生效优先级：<b>链上显式调用 &gt; 字段注解 &gt; 类注解 &gt; 默认关闭</b>。
- *
- * <p>
- * <b>两侧类型不同</b>的字段（派生 / 组合，如身份集合 ⇒ 身份串）用 {@code map(getter, setter, converter)}： 属性名同样来自取值引用，<b>转换器当场给出</b>（另有
- * {@code BiFunction} 重载可拿到负载做多字段联动）。该形态下 按值判定的修饰符有类型分工（声明期校验）：{@code
- * withDefault} / {@code ignoreValue*} 的实参必须是转换前 （DTO 侧）的类型、{@code ignoreIf*} 一律不可用，{@code
- * required(...)} 的谓词作用于转换后的值。
- *
- * <p>
- * <b>入口级策略</b>用链首的 {@link BeanMapper#excludes(BeanGetter[])} 声明："本入口不管这些字段"（恒不写入、不计入 "有没有输入"、{@code
- * mapAll()} 会跳过它），且同一入口若再声明它们 ⇒ 声明期报错。它与覆盖度断言配套： DTO 每个字段的归宿 = 某个入口链上声明（可写）／{@code @BeanUnmapped}（永不写入）／某入口
- * {@code excludes} （本入口不管），三者都不是即构建期断言失败（写在域的测试里）—— <b>不需要任何手抄清单</b>。 "拒绝"默认以抛 {@code BeanMapAbortException}（4xx）表达，与项目的 4xx
- * 表达一致（框架的异常过滤器渲染成标准响应信封）；中断异常可由 {@link AbortHandler} 按入口替换。
- *
- * <h3>怎么用</h3>
+ * <h3>用法示例</h3>
  *
  * <pre>{@code
  * BeanMapResource<User> updated = BeanMapper.of(user, new JavaBeanAccessor(resource))
  *         .map(resource::getEmail, user::setEmail).ignoreBlank()
  *         .map(resource::getNickname, user::setNickname)
- *         .map(resource::getIdentities, User::setIdentity, identityProvider::composeIdentities)
  *         .apply();
  * }</pre>
+ *
+ * <h3>覆盖度断言</h3>
  * <p>
- * 声明顺序即执行顺序；{@code apply()} 返回 {@link BeanMapResource}；值不满足 {@code required} / {@code notClearable} 时抛 4xx。
- * 子对象块用 {@code sub(...)} 声明，其 DTO 侧属性类型须实现 {@link SourceAccessor}。
- *
- * <h3>包内结构</h3>
- *
- * <ul>
- * <li>{@link cn.labzen.beanmap.BeanMapper} — 入口；
- * <li>{@link cn.labzen.beanmap.NestedPartial} — 子对象块（类型上没有 {@code apply()}）；
- * <li>{@link cn.labzen.beanmap.BeanField} — 字段句柄与字段处理管线；
- * <li>{@link cn.labzen.beanmap.BeanMapResource} — 写入结果（写入了哪些字段、各列要落库的值）；
- * <li>{@link cn.labzen.beanmap.BeanGetter} — 已绑定取值引用（{@code resource::getEmail}），用于解析属性名；
- * <li>{@link cn.labzen.beanmap.BeanSetter} — 未绑定设值引用（{@code User::setEmail}），写入时作用于当前链节点的 domain；
- * <li>{@link cn.labzen.beanmap.BeanMapCoverage} — 覆盖度断言（构建期：由域的测试调用，运行期不做声明校验）；
- * <li>{@link cn.labzen.beanmap.BeanOp} / {@link cn.labzen.beanmap.MappingType} — 映射接口方法的显式形态声明；
- * <li>相关的源对象载体见 {@code SourceAccessor#isProvided}，标注见 {@code @BeanUnmapped} / {@code @BeanClearable} /
- * {@code @BeanUnmappedBlank}，异常见 {@code BeanMapException}。
- * </ul>
+ * DTO 每个字段的归宿 = 某个入口链上声明（可写）／{@code @BeanUnmapped}（永不写入）／某入口 {@code excludes}
+ * （本入口不管），三者都不是即由 {@link cn.labzen.beanmap.core.BeanMapCoverage} 在构建期断言失败，
+ * 不需要手抄字段清单。
  */
 package cn.labzen.beanmap;

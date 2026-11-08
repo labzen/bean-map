@@ -6,7 +6,38 @@
 
 - `MAJOR` 承载不兼容变更，`MINOR` 承载向后兼容的功能增量，`PATCH` 承载缺陷修复、测试与文档。
 - `1.1.0` 中 `BeanMapAbortException` 的构造器变更是不兼容变更；按语义化版本由 `MAJOR` 承载。该版本已发布至 Maven Central 且不可覆盖，处置方式是在本文件的「升级说明」中给出迁移方式，不追加 `(int, String)` 兼容构造器：整型状态码与 `AbortCode` 语义码是两套契约，`getCode()` 已满足整型码需求，追加旧构造器会让中断异常的构造入口重新分叉。
-- 后续不兼容变更走 `MAJOR`，并在对应版本的「不兼容变更」与文末「升级说明」两处同时标注；新增公开注解 / 类走 `MINOR`（阶段 12 的 `1.2.0` 属此类）。
+- 不兼容变更在对应版本的「不兼容变更」与文末「升级说明」两处同时标注并给出迁移方式；版本号按项目发布决策确定（`1.2.0` 的新增公开注解 / 类、`1.3.0` 的包结构重组均以 `MINOR` 发布）。
+
+## [1.3.0] - 2026-11-08
+
+> 待发布：当前源码版本为 `1.3.0`。
+
+按功能性重组包结构，类名、方法签名与行为不变，仅包路径变化。
+
+### 不兼容变更
+
+所有类型的全限定名发生变化（含包内可见类型），使用方需按所在包调整 import：
+
+| 所在包 | 类 |
+|---|---|
+| `cn.labzen.beanmap.core` | `BeanMapper`、`BeanReader`、`BeanComposer`、`BeanMapConfiguration`、`BeanMapCoverage`、`PartialChain`、`BeanField`、`NestedPartial`、`PartialState`、`BeanMapResource`、`LambdaNames`、`BeanGetter`、`BeanSetter` |
+| `cn.labzen.beanmap.accessor` | `SourceAccessor`、`JavaBeanAccessor`、`MapAccessor`、`DtoReflection` |
+| `cn.labzen.beanmap.spi` | `AbortCode`、`AbortHandler`、`InstantiationStrategy`、`ConflictPolicy` |
+| `cn.labzen.beanmap.exception` | `BeanMapException`、`BeanMapAbortException` |
+| `cn.labzen.beanmap.annotation` | `BeanMap`、`BeanOp`、`MappingType`、`BeanMapField`、`BeanMapFields`、`BeanTarget`（原有 `@BeanUnmapped` / `@BeanClearable` / `@BeanUnmappedBlank` 路径不变） |
+| `cn.labzen.beanmap.processor` | `BeanMapProcessor` |
+
+`META-INF/services/javax.annotation.processing.Processor` 注册的处理器类为 `cn.labzen.beanmap.processor.BeanMapProcessor`；APT 生成代码的 import 分别指向 `cn.labzen.beanmap.core.BeanMapper`、`cn.labzen.beanmap.core.BeanReader` 与 `cn.labzen.beanmap.accessor.JavaBeanAccessor`。根包 `cn.labzen.beanmap` 仅保留 `package-info.java`。
+
+### 测试
+
+- APT 生成用例补充生成代码 import 包路径断言；测试总数保持 50，`mvn -o -B clean verify` 全绿。
+
+### 兼容性说明
+
+- Java 通配符 import 不递归子包，单个 `import cn.labzen.beanmap.*;` 无法引入各功能子包的类型，需按上表分别引入。
+- 13 个写核心相关类因包内可见性互访保持同一包（`.core`），封装不变。
+- 本版本按项目决策以 `MINOR` 发布；包路径变更属不兼容变更，迁移方式见文末「升级说明」。
 
 ## [1.2.0] - 2026-11-08
 
@@ -107,3 +138,13 @@
 - 新接口推荐在每个方法上标注 `@BeanOp(MappingType.XXX)`；标注后方法名不再参与分派，可自由命名并在同一接口声明多个同形态方法。
 - 形态与签名不匹配时编译期报错（如 `COPY_DTO` 要求双参且返回 `void`）；用法与回退判据见 `README.md` 的「APT 生成」。
 - 补 `@BeanOp` 可消除回退告警；告警不影响生成结果。
+
+### 1.2.0 → 1.3.0
+
+包路径变化，类名、方法签名与行为不变。按以下顺序调整：
+
+- 把依赖坐标中的版本改为 `1.3.0`（或由依赖管理统一锁定）。
+- 按 `1.3.0` 的「不兼容变更」迁移表调整 import：`cn.labzen.beanmap.core` 承载映射引擎与链式 API，`cn.labzen.beanmap.accessor` 承载源访问器，`cn.labzen.beanmap.spi` 承载策略类型，`cn.labzen.beanmap.exception` 承载异常，`cn.labzen.beanmap.annotation` 承载全部注解，`cn.labzen.beanmap.processor` 承载 APT 处理器。
+- 使用 `import cn.labzen.beanmap.*;` 的代码需按实际引用的类型分别引入对应子包；Java 通配符 import 不递归子包。
+- 显式指定 APT 处理器类名的构建配置（如 `-processor` 参数）使用 `cn.labzen.beanmap.processor.BeanMapProcessor`；通过 `META-INF/services` 自动发现处理器的构建无需调整。
+- 由 APT 生成的 `*Impl` 源码中的 import 由处理器按功能包输出，重新编译即可。

@@ -3,6 +3,8 @@
  */
 package cn.labzen.beanmap;
 
+import cn.labzen.beanmap.annotation.BeanMap;
+
 import org.junit.jupiter.api.Test;
 
 import javax.tools.Diagnostic;
@@ -33,7 +35,7 @@ class BeanMapProcessorTest {
     return """
             package t;
 
-            import cn.labzen.beanmap.*;
+            import cn.labzen.beanmap.annotation.*;
             import java.util.function.Function;
 
             @BeanMap
@@ -76,7 +78,7 @@ class BeanMapProcessorTest {
             "-classpath", classpath,
             "-s", generatedDir.toString(),
             "-d", classesDir.toString(),
-            "-processor", "cn.labzen.beanmap.BeanMapProcessor"));
+            "-processor", "cn.labzen.beanmap.processor.BeanMapProcessor"));
     args.addAll(Arrays.asList(options));
 
     boolean ok;
@@ -102,6 +104,9 @@ class BeanMapProcessorTest {
 
     assertTrue(result.ok(), result.diagnostics());
     assertTrue(result.generated().contains("@Component"), result.generated());
+    assertTrue(result.generated().contains("import cn.labzen.beanmap.core.BeanMapper;"), result.generated());
+    assertTrue(result.generated().contains("import cn.labzen.beanmap.core.BeanReader;"), result.generated());
+    assertTrue(result.generated().contains("import cn.labzen.beanmap.accessor.JavaBeanAccessor;"), result.generated());
   }
 
   @Test

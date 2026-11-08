@@ -3,6 +3,11 @@
  */
 package cn.labzen.beanmap;
 
+import cn.labzen.beanmap.accessor.*;
+import cn.labzen.beanmap.core.*;
+import cn.labzen.beanmap.exception.*;
+import cn.labzen.beanmap.spi.*;
+
 import org.junit.jupiter.api.Test;
 import org.springframework.core.convert.support.DefaultConversionService;
 import org.springframework.core.convert.support.GenericConversionService;

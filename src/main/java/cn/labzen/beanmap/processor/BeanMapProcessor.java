@@ -44,6 +44,10 @@ import javax.tools.JavaFileObject;
  * 注解规则均由其承载），因此本处理器<b>不读取 domain/DTO 的字段</b>， 只解析映射接口的方法签名与 {@link BeanMapField} 声明，无需与 Lombok 抢占字段生成顺序。
  *
  * <p>
+ * 写方向（{@code TO_DOMAIN} / {@code UPDATE_DOMAIN}）的源对象本身实现 {@code SourceAccessor} 时直接透传，由源对象判定字段是否出现；
+ * 其余来源包一层 {@code JavaBeanAccessor}，字段视为全部出现。
+ *
+ * <p>
  * 生成类的注册方式由编译器选项 {@code -Abeanmap.registry} 决定：{@code spring}（默认）生成带 {@code @Component} 的实现；
  * {@code spi} 生成不带注册注解的普通类，由使用方按自己的容器注册。库不提供全局注册表，也不做 {@code ServiceLoader} 自动加载。
  *
@@ -105,18 +109,22 @@ public class BeanMapProcessor extends AbstractProcessor {
     boolean spring = REGISTRY_SPRING.equals(registry());
     String componentImport = spring ? "import " + SPRING_COMPONENT + ";\n" : "";
     String componentAnnotation = spring ? "@Component\n" : "";
+    String bodyText = body.toString();
+    // 写方向生成代码会引用 SourceAccessor：源对象本身携带三态语义时直通，否则才包一层 JavaBeanAccessor
+    String accessorImport = bodyText.contains("SourceAccessor")
+            ? "import " + ACCESSOR_PKG + ".SourceAccessor;\n" : "";
     String src = """
             package %s;
 
             import %s.BeanMapper;
             import %s.BeanReader;
             import %s.JavaBeanAccessor;
-            %s
+            %s%s
             %spublic class %s implements %s {
             %s
             }
             """.formatted(pkg, CORE_PKG, CORE_PKG, ACCESSOR_PKG,
-            componentImport, componentAnnotation, implName, ifaceName, body.toString());
+            accessorImport, componentImport, componentAnnotation, implName, ifaceName, bodyText);
 
     try {
       Filer filer = processingEnv.getFiler();
@@ -213,10 +221,13 @@ public class BeanMapProcessor extends AbstractProcessor {
     return """
             @Override
             public void %s(%s) {
-              BeanMapper.of(%s, new JavaBeanAccessor(%s)).mapAll().apply();
+              Object beanMapRawSource = %s;
+              SourceAccessor beanMapSource = beanMapRawSource instanceof SourceAccessor beanMapProvided
+                      ? beanMapProvided : new JavaBeanAccessor(beanMapRawSource);
+              BeanMapper.of(%s, beanMapSource).mapAll().apply();
             }
 
-            """.formatted(name, paramList, domainName, dtoName);
+            """.formatted(name, paramList, dtoName, domainName);
   }
 
   private String generateToDomain(String domainType, String name, String paramList, String dtoName) {
@@ -224,7 +235,10 @@ public class BeanMapProcessor extends AbstractProcessor {
             @Override
             public %s %s(%s) {
               %s beanMapTarget = new %s();
-              BeanMapper.of(beanMapTarget, new JavaBeanAccessor(%s)).mapAll().apply();
+              Object beanMapRawSource = %s;
+              SourceAccessor beanMapSource = beanMapRawSource instanceof SourceAccessor beanMapProvided
+                      ? beanMapProvided : new JavaBeanAccessor(beanMapRawSource);
+              BeanMapper.of(beanMapTarget, beanMapSource).mapAll().apply();
               return beanMapTarget;
             }
 
@@ -301,7 +315,8 @@ public class BeanMapProcessor extends AbstractProcessor {
       Class<?> converter = mf.converter();
       return void.class.equals(converter) ? null : converter.getName();
     } catch (MirroredTypeException e) {
-      return e.getTypeMirror().toString();
+      TypeMirror type = e.getTypeMirror();
+      return type.getKind() == TypeKind.VOID ? null : type.toString();
     }
   }
 

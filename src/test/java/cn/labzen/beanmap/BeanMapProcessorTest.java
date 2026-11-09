@@ -178,7 +178,9 @@ class BeanMapProcessorTest {
     assertTrue(result.generated().contains("public t.Domain create(t.Dto dto)"), result.generated());
     assertTrue(result.generated().contains("t.Domain beanMapTarget = new t.Domain()"), result.generated());
     assertTrue(result.generated().contains("public void patch(t.Dto dto, t.Domain domain)"), result.generated());
-    assertTrue(result.generated().contains("BeanMapper.of(domain, new JavaBeanAccessor(dto))"), result.generated());
+    assertTrue(result.generated().contains("import cn.labzen.beanmap.accessor.SourceAccessor;"), result.generated());
+    assertTrue(result.generated().contains("beanMapRawSource instanceof SourceAccessor beanMapProvided"), result.generated());
+    assertTrue(result.generated().contains("BeanMapper.of(domain, beanMapSource)"), result.generated());
     assertTrue(result.generated().contains("public void duplicate(t.Src src, t.Tgt tgt)"), result.generated());
     assertTrue(result.generated().contains("BeanReader.read(src, tgt).mapAll().apply()"), result.generated());
     assertTrue(result.generated().contains("public t.Dto view(t.Domain domain)"), result.generated());
@@ -240,6 +242,31 @@ class BeanMapProcessorTest {
             """));
 
     assertTrue(result.ok(), result.diagnostics());
-    assertTrue(result.generated().contains("BeanMapper.of(domain, new JavaBeanAccessor(dto))"), result.generated());
+    assertTrue(result.generated().contains("BeanMapper.of(domain, beanMapSource)"), result.generated());
+  }
+
+  @Test
+  void sourceAccessorSourceIsPassedThrough() throws Exception {
+    Compilation result = compile(fixture("""
+              @BeanOp(MappingType.UPDATE_DOMAIN)
+              void patch(Dto dto, @BeanTarget Domain domain);
+            """));
+
+    assertTrue(result.ok(), result.diagnostics());
+    assertTrue(result.generated().contains("Object beanMapRawSource = dto;"), result.generated());
+    assertTrue(result.generated().contains("? beanMapProvided : new JavaBeanAccessor(beanMapRawSource)"), result.generated());
+  }
+
+  @Test
+  void defaultConverterIsNotEmitted() throws Exception {
+    Compilation result = compile(fixture("""
+              @BeanOp(MappingType.TO_DTO)
+              @BeanMapField(source = "name", target = "name")
+              Dto view(Domain domain);
+            """));
+
+    assertTrue(result.ok(), result.diagnostics());
+    assertTrue(result.generated().contains(".map(\"name\""), result.generated());
+    assertFalse(result.generated().contains("new void()"), result.generated());
   }
 }

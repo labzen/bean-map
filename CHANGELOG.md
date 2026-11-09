@@ -8,6 +8,27 @@
 - `1.1.0` 中 `BeanMapAbortException` 的构造器变更是不兼容变更；按语义化版本由 `MAJOR` 承载。该版本已发布至 Maven Central 且不可覆盖，处置方式是在本文件的「升级说明」中给出迁移方式，不追加 `(int, String)` 兼容构造器：整型状态码与 `AbortCode` 语义码是两套契约，`getCode()` 已满足整型码需求，追加旧构造器会让中断异常的构造入口重新分叉。
 - 不兼容变更在对应版本的「不兼容变更」与文末「升级说明」两处同时标注并给出迁移方式；版本号按项目发布决策确定（`1.2.0` 的新增公开注解 / 类、`1.3.0` 的包结构重组均以 `MINOR` 发布）。
 
+## [1.4.0] - 2026-11-09
+
+写方向 APT 生成代码支持源对象自带三态语义。
+
+### 新增
+
+- `BeanMapProcessor` 为 `TO_DOMAIN` / `UPDATE_DOMAIN` 生成源访问器选择：源对象实现 `SourceAccessor` 时直接透传，由源对象判定字段是否出现；其余来源包一层 `JavaBeanAccessor`，字段视为全部出现。生成类按需引入 `cn.labzen.beanmap.accessor.SourceAccessor`。
+- 消费方可以让请求 DTO 实现 `SourceAccessor`，使其字段出现记录直接驱动三态写入，无需为每个映射接口手写实现。
+
+### 兼容性
+
+- 公开 API 无变更，二进制兼容；普通 JavaBean 源仍走 `JavaBeanAccessor`，行为不变。
+
+### 修复
+
+- `@BeanMapField` 未指定 `converter` 时，APT 不再把编译期的 `void` 类型当作转换器输出 `new void()`。
+
+### 测试
+
+- APT 生成用例断言写方向的源访问器选择与 `SourceAccessor` import，并覆盖默认 `converter` 的生成结果。
+
 ## [1.3.0] - 2026-11-08
 
 > 已发布至 Maven Central（2026-11-08），`V1.3.0` tag 与 `main` 同步；本版本为不兼容变更，升级方式见文末「1.2.0 → 1.3.0」。
@@ -148,3 +169,7 @@
 - 使用 `import cn.labzen.beanmap.*;` 的代码需按实际引用的类型分别引入对应子包；Java 通配符 import 不递归子包。
 - 显式指定 APT 处理器类名的构建配置（如 `-processor` 参数）使用 `cn.labzen.beanmap.processor.BeanMapProcessor`；通过 `META-INF/services` 自动发现处理器的构建无需调整。
 - 由 APT 生成的 `*Impl` 源码中的 import 由处理器按功能包输出，重新编译即可。
+
+### 1.3.0 → 1.4.0
+
+二进制兼容，直接替换版本号即可。请求 DTO 实现 `SourceAccessor` 后，APT 生成的 `TO_DOMAIN` / `UPDATE_DOMAIN` 方法直接使用该 DTO 的 `isProvided(...)` 判定字段是否出现；普通 JavaBean 源仍由 `JavaBeanAccessor` 承载，行为不变。
